@@ -1,0 +1,238 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Setup Raspberry Pi 4 - USV-AM</title><style>
+@page { size: A4; margin: 18mm 16mm; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+       font-size: 11pt; line-height: 1.5; color: #1a1a1a; max-width: 100%; }
+h1 { font-size: 20pt; border-bottom: 3px solid #10b981; padding-bottom: 6px; margin-top: 0; }
+h2 { font-size: 15pt; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-top: 22px; color: #047857; }
+h3 { font-size: 12.5pt; margin-top: 16px; }
+code { font-family: "Fira Code", Consolas, monospace; background: #f2f4f7;
+       padding: 1px 5px; border-radius: 4px; font-size: 9.5pt; }
+pre { background: #1e293b; color: #e2e8f0; padding: 12px 14px; border-radius: 8px;
+      overflow-x: auto; font-size: 9pt; line-height: 1.4; page-break-inside: avoid; }
+pre code { background: none; color: inherit; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt;
+        page-break-inside: avoid; }
+th, td { border: 1px solid #cbd5e1; padding: 6px 9px; text-align: left; vertical-align: top; }
+th { background: #10b981; color: #fff; }
+tr:nth-child(even) td { background: #f8fafc; }
+blockquote { border-left: 4px solid #f59e0b; background: #fffbeb; margin: 12px 0;
+             padding: 8px 14px; color: #78350f; }
+hr { border: none; border-top: 1px solid #e2e8f0; margin: 20px 0; }
+a { color: #2563eb; text-decoration: none; }
+ul, ol { padding-left: 26px; }
+li { margin: 3px 0; }
+</style></head>
+<body><h1>Tutorial — Configurar o Raspberry Pi 4 (USV-AM)</h1>
+<p>Guia do zero: gravar o SO, acessar por SSH, instalar as dependências, habilitar a</p>
+<p>UART e deixar o daemon de bordo (<code>rpi_daemon.py</code>) rodando como serviço systemd.</p>
+<p>Cobre a <strong>F0</strong> (preparação) e a instalação do que já foi implementado nas</p>
+<p><strong>F2/F3</strong> (daemon + resiliência). O código do RPi vive em</p>
+<p><code>C:\Users\orlan\PycharmProjects\USVs-Drone-Fluvial-Autonomo\rpi</code>.</p>
+<blockquote><strong>Por que SSH e não USB:</strong> o RPi4 não tem armazenamento interno e não vira um</blockquote>
+<blockquote>dispositivo USB ao ligar na porta OTG — ele boota de um microSD e entra na rede.</blockquote>
+<blockquote>O acesso por SSH via Wi-Fi/ethernet é o ambiente real de produção onde o daemon</blockquote>
+<blockquote>vai rodar, então é por aí que configuramos.</blockquote>
+<hr>
+<h2>Pré-requisitos</h2>
+<ul>
+<li>Raspberry Pi 4 (2 GB+), fonte 5V/3A</li>
+<li>microSD 32 GB (classe A2 recomendada) + leitor de cartão no PC</li>
+<li>Rede Wi-Fi (SSID + senha) ou cabo ethernet</li>
+<li>Projeto Firebase com um <strong>service account</strong> (arquivo JSON) — ver Passo 6</li>
+</ul>
+<hr>
+<h2>Passo 1 — Gravar o Raspberry Pi OS no microSD</h2>
+<ol>
+<li>Instale o <strong>Raspberry Pi Imager</strong> no seu PC: https://www.raspberrypi.com/software/</li>
+<li>Insira o microSD no leitor.</li>
+<li>No Imager:</li>
+</ol>
+<ul>
+<li><strong>Choose Device:</strong> Raspberry Pi 4</li>
+<li><strong>Choose OS:</strong> Raspberry Pi OS (other) → <strong>Raspberry Pi OS Lite (64-bit)</strong></li>
+</ul>
+<p>     (sem desktop — o RPi roda headless)</p>
+<ul>
+<li><strong>Choose Storage:</strong> o microSD</li>
+</ul>
+<ol>
+<li>Clique em <strong>Next</strong> → <strong>Edit Settings</strong> (a engrenagem ⚙️) e configure <strong>antes de gravar</strong>:</li>
+</ol>
+<ul>
+<li><strong>Set hostname:</strong> <code>usv-rpi</code></li>
+<li><strong>Enable SSH:</strong> ✅ (autenticação por senha, ou cole sua chave pública)</li>
+<li><strong>Set username and password:</strong> ex. usuário <code>orlando</code> + uma senha</li>
+<li><strong>Configure wireless LAN:</strong> seu SSID + senha + país (<code>BR</code>)</li>
+<li><strong>Set locale:</strong> timezone <code>America/Manaus</code> (ou a sua), teclado <code>br</code></li>
+</ul>
+<ol>
+<li><strong>Save</strong> → <strong>Write</strong>. Aguarde gravar e verificar. Ejete o cartão.</li>
+</ol>
+<hr>
+<h2>Passo 2 — Primeiro boot</h2>
+<ol>
+<li>Insira o microSD no RPi.</li>
+<li>Ligue a fonte 5V/3A. O LED verde deve <strong>piscar</strong> (atividade do SD) — se só o</li>
+</ol>
+<p>   vermelho acende e o verde fica apagado, o SD não bootou (regrave o Passo 1).</p>
+<ol>
+<li>Aguarde ~1–2 min no primeiro boot (ele expande o filesystem e conecta no Wi-Fi).</li>
+</ol>
+<hr>
+<h2>Passo 3 — Acessar por SSH (do seu PC Windows)</h2>
+<p>No PowerShell:</p>
+<pre><code>
+ssh orlando@usv-rpi.local
+</code></pre>
+<p>Se <code>usv-rpi.local</code> não resolver (mDNS bloqueado em algumas redes), descubra o IP</p>
+<p>no painel do seu roteador ou com um scanner, e use o IP:</p>
+<pre><code>
+ssh orlando@192.168.x.y
+</code></pre>
+<p>Aceite a fingerprint na primeira conexão e entre com a senha definida no Passo 1.</p>
+<hr>
+<h2>Passo 4 — Atualizar o sistema e instalar dependências de SO</h2>
+<p>Já dentro do RPi (via SSH):</p>
+<pre><code>
+sudo apt update &amp;&amp; sudo apt full-upgrade -y
+sudo apt install -y git python3-venv python3-pip
+sudo reboot   # se o kernel foi atualizado
+</code></pre>
+<p>Reconecte por SSH após o reboot.</p>
+<hr>
+<h2>Passo 5 — Habilitar a UART de hardware (link com o ESP32)</h2>
+<p>O daemon fala com o ESP32 pela UART do RPi (GPIO14 TXD / GPIO15 RXD).</p>
+<pre><code>
+sudo raspi-config
+</code></pre>
+<ul>
+<li><strong>3 Interface Options → I6 Serial Port</strong></li>
+<li>*&quot;Would you like a login shell over serial?&quot;* → <strong>No</strong> (libera a UART pro daemon)</li>
+<li>*&quot;Would you like the serial port hardware enabled?&quot;* → <strong>Yes</strong></li>
+<li><strong>Finish</strong> → reiniciar quando pedir.</li>
+</ul>
+<p>Depois do reboot, a porta fica em <code>/dev/serial0</code>. Garanta que seu usuário está no</p>
+<p>grupo <code>dialout</code> (necessário para abrir a serial):</p>
+<pre><code>
+sudo usermod -aG dialout $USER
+# saia e reentre no SSH para o grupo valer:
+exit
+</code></pre>
+<p>Reconecte e confirme:</p>
+<pre><code>
+groups   # deve listar &#x27;dialout&#x27;
+ls -l /dev/serial0
+</code></pre>
+<h3>Ligação física RPi ↔ ESP32 (3 fios, 3.3V direto)</h3>
+<table><thead><tr>
+<th>RPi (pino BCM)</th>
+<th>ESP32</th>
+</tr></thead><tbody>
+<tr><td>GPIO14 TXD →</td><td>GPIO16 (RX2)</td></tr>
+<tr><td>GPIO15 RXD ←</td><td>GPIO17 (TX2)</td></tr>
+<tr><td>GND</td><td>GND</td></tr>
+</tbody></table>
+<blockquote>Ambos são 3.3V — <strong>não</strong> use level shifter. TX de um vai no RX do outro (cruzado).</blockquote>
+<hr>
+<h2>Passo 6 — Service account do Firebase</h2>
+<p>O daemon usa o <strong>Admin SDK</strong> com uma chave de service account (privilégio total no</p>
+<p>RTDB), diferente do firmware que usa email/senha.</p>
+<ol>
+<li>Firebase Console → ⚙️ <strong>Configurações do projeto</strong> → <strong>Contas de serviço</strong></li>
+<li><strong>Gerar nova chave privada</strong> → baixa um JSON.</li>
+<li>Copie o JSON para o RPi (do seu PC):</li>
+</ol>
+<pre><code>
+   scp C:\caminho\serviceAccount.json orlando@usv-rpi.local:/home/orlando/serviceAccount.json
+</code></pre>
+<ol>
+<li>Proteja o arquivo no RPi:</li>
+</ol>
+<pre><code>
+   chmod 600 /home/orlando/serviceAccount.json
+</code></pre>
+<hr>
+<h2>Passo 7 — Clonar o projeto e criar o ambiente Python</h2>
+<pre><code>
+cd ~
+git clone https://github.com/Vandrekad/USVs-Drone-Fluvial-Autonomo.git
+cd USVs-Drone-Fluvial-Autonomo/rpi
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt   # pyserial + firebase-admin
+</code></pre>
+<h3>Validar sem hardware antes de conectar o ESP32</h3>
+<pre><code>
+python rpi_daemon.py --selftest        # F2+F3 em memória
+python test_integration.py             # ESP32 simulado &lt;-&gt; bridge por fio em memória
+</code></pre>
+<p>Ambos devem terminar com <code>OK</code>.</p>
+<hr>
+<h2>Passo 8 — Rodar o daemon manualmente (teste com hardware)</h2>
+<p>Com o ESP32 flashado e ligado pelos 3 fios do Passo 5:</p>
+<pre><code>
+source ~/USVs-Drone-Fluvial-Autonomo/rpi/.venv/bin/activate
+python rpi_daemon.py \
+    --port /dev/serial0 \
+    --service-account /home/orlando/serviceAccount.json \
+    --database-url https://usvs-drone-fluvial-autonomo-default-rtdb.firebaseio.com/ \
+    --drone-id drone_01
+</code></pre>
+<p>Você deve ver no log: <code>link serial aberto</code>, telemetria chegando do ESP32, e o</p>
+<p>status/telemetria aparecendo no RTDB. <code>Ctrl+C</code> para parar.</p>
+<hr>
+<h2>Passo 9 — Instalar como serviço systemd (auto-start + restart)</h2>
+<p>Assim o daemon sobe sozinho no boot e reinicia se cair (F3).</p>
+<p>Ajuste os caminhos/usuário dentro do <code>.service</code> se você não usou <code>orlando</code>/paths</p>
+<p>padrão (o arquivo versionado usa <code>pi</code>; edite <code>User=</code>, <code>WorkingDirectory=</code>,</p>
+<p><code>ExecStart=</code> e o caminho do <code>serviceAccount.json</code>):</p>
+<pre><code>
+cd ~/USVs-Drone-Fluvial-Autonomo/rpi
+
+# 1. Limite/rotação do journal (protege o cartão SD em campo)
+sudo cp deploy/usv-rpi-daemon.journald.conf /etc/systemd/journald.conf.d/usv.conf
+sudo systemctl restart systemd-journald
+
+# 2. Instalar a unit
+sudo cp deploy/usv-rpi-daemon.service /etc/systemd/system/
+sudo nano /etc/systemd/system/usv-rpi-daemon.service   # ajuste User/paths/URL
+sudo systemctl daemon-reload
+sudo systemctl enable --now usv-rpi-daemon
+</code></pre>
+<p>Acompanhar:</p>
+<pre><code>
+systemctl status usv-rpi-daemon
+journalctl -u usv-rpi-daemon -f
+</code></pre>
+<p>O serviço reinicia sozinho em caso de falha (<code>Restart=always</code>, backoff 3s) com um</p>
+<p>freio anti-loop (5 falhas em 60s → para). Só sobe após a rede estar pronta.</p>
+<hr>
+<h2>Checklist final (F0 concluída)</h2>
+<ul>
+<li>[ ] RPi bootando e acessível por SSH (<code>ssh orlando@usv-rpi.local</code>)</li>
+<li>[ ] Sistema atualizado, <code>git</code> e <code>python3-venv</code> instalados</li>
+<li>[ ] UART habilitada (<code>/dev/serial0</code>), usuário no grupo <code>dialout</code></li>
+<li>[ ] <code>serviceAccount.json</code> copiado e com <code>chmod 600</code></li>
+<li>[ ] Projeto clonado, <code>.venv</code> criado, <code>requirements.txt</code> instalado</li>
+<li>[ ] <code>--selftest</code> e <code>test_integration.py</code> passam (<code>OK</code>)</li>
+<li>[ ] <code>usv-rpi-daemon</code> habilitado e ativo no systemd</li>
+</ul>
+<p>Com isso a F0 fecha. O bring-up com sensores/motores reais é a F4 (a partir de 19/09).</p>
+<hr>
+<h2>Troubleshooting rápido</h2>
+<table><thead><tr>
+<th>Sintoma</th>
+<th>Causa provável</th>
+<th>Ação</th>
+</tr></thead><tbody>
+<tr><td>Só LED vermelho, verde apagado</td><td>SD não bootou</td><td>Regravar o SO (Passo 1)</td></tr>
+<tr><td><code>usv-rpi.local</code> não resolve</td><td>mDNS bloqueado na rede</td><td>Usar o IP direto (Passo 3)</td></tr>
+<tr><td><code>Permission denied</code> em <code>/dev/serial0</code></td><td>Usuário fora do <code>dialout</code></td><td><code>sudo usermod -aG dialout $USER</code> + relogar</td></tr>
+<tr><td><code>/dev/serial0</code> não existe</td><td>UART não habilitada</td><td><code>raspi-config</code> (Passo 5) + reboot</td></tr>
+<tr><td>Daemon dá <code>firebase-admin não instalado</code></td><td>venv não ativado / deps faltando</td><td><code>source .venv/bin/activate &amp;&amp; pip install -r requirements.txt</code></td></tr>
+<tr><td>Telemetria não sobe no RTDB</td><td>service account errado / DB URL errada</td><td>Conferir <code>--service-account</code> e <code>--database-url</code></td></tr>
+<tr><td><code>esp32_silence</code> nos logs</td><td>ESP32 mudo (reset/cabo solto)</td><td>Conferir os 3 fios e alimentação do ESP32</td></tr>
+</tbody></table></body></html>
