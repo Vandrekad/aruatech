@@ -1,0 +1,42 @@
+[Unit]
+Description=USV-AM RPi4 daemon (ponte UART ESP32 <-> Firebase RTDB)
+Documentation=file:///home/pi/USVs-Drone-Fluvial-Autonomo/rpi/README.md
+# So sobe apos a rede estar pronta (Firebase precisa de conectividade)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/USVs-Drone-Fluvial-Autonomo/rpi
+
+# Ajuste os caminhos/URL conforme o seu setup (F0 item 0.4 gera o serviceAccount.json)
+ExecStart=/home/pi/USVs-Drone-Fluvial-Autonomo/rpi/.venv/bin/python \
+    /home/pi/USVs-Drone-Fluvial-Autonomo/rpi/rpi_daemon.py \
+    --port /dev/serial0 \
+    --service-account /home/pi/serviceAccount.json \
+    --database-url https://usvs-drone-fluvial-autonomo-default-rtdb.firebaseio.com/ \
+    --drone-id drone_01
+
+# Resiliencia: reinicia sempre que cair, com backoff. StartLimit evita loop de crash
+# apertado (5 falhas em 60s => para e espera intervencao).
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Logs vao para o journald (stdout/stderr). Rotacao pelo journald (ver README).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=usv-rpi-daemon
+
+# Endurecimento leve (o daemon so precisa da UART, rede e do proprio diretorio)
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/pi/USVs-Drone-Fluvial-Autonomo/rpi
+# UART precisa do grupo dialout (usuario pi ja costuma estar nele)
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target

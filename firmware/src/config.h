@@ -46,10 +46,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PINOS DE HARDWARE
 // ─────────────────────────────────────────────────────────────────────────────
-// GPS (UART2)
-#define GPS_RX_PIN        16
-#define GPS_TX_PIN        17
+// GPS (UART2) — movido para GPIO 25/26 na F1 (16/17 liberados para o link RPi)
+#define GPS_RX_PIN        25
+#define GPS_TX_PIN        26
 #define GPS_BAUD          9600
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LINK COM RASPBERRY PI 4 (UART — Serial1 nos GPIO 16/17)
+// ─────────────────────────────────────────────────────────────────────────────
+// ESP32 Serial1: RX = GPIO16 (recebe do TX do RPi), TX = GPIO17 (envia ao RX do RPi)
+// 3.3V direto, sem level shifter. Protocolo: JSON-lines a 115200 baud.
+#define RPI_LINK_RX_PIN   16
+#define RPI_LINK_TX_PIN   17
+#define RPI_LINK_BAUD     115200
+// Timeout: se nenhuma mensagem do RPi chegar nesse período, o ESP32 assume que
+// está sozinho (modo autônomo) e volta a publicar direto no Firebase.
+#define RPI_LINK_TIMEOUT_MS  30000
 
 // I2C (Bússola HMC5883L)
 #define I2C_SDA_PIN       21

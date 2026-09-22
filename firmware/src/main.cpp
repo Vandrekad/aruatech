@@ -7,6 +7,7 @@
 #include "modules/commands/commands.h"
 #include "modules/navigation/navigation.h"
 #include "modules/state/state.h"
+#include "modules/link/serial_link.h"
 #include "modules/tests/tests.h"
 
 // Flag para ativar o app de testes de componentes (desliga missão normal)
@@ -26,6 +27,9 @@ void setup() {
 
   // 2. Sensores de hardware
   initHardwareSensors();
+
+  // 2b. Link serial com o Raspberry Pi 4 (aditivo — ESP32 opera sem ele)
+  initSerialLink();
 
   // 3. WiFi (não-bloqueante após timeout)
   setupWiFi();
@@ -53,6 +57,9 @@ void setup() {
 }
 
 void loop() {
+  // ── Link com o RPi (processa comandos recebidos, não-bloqueante) ──
+  processSerialLink();
+
   // ── Gerenciamento de conectividade ──
   manageWiFi();
 
@@ -81,13 +88,24 @@ void loop() {
   // ── Publicação de telemetria (a cada TELEMETRY_INTERVAL_MS) ──
   if (now - telemetryPrevMs >= TELEMETRY_INTERVAL_MS || telemetryPrevMs == 0) {
     telemetryPrevMs = now;
-    if (!publishTelemetry()) {
-      Serial.println("Aviso: publicação de telemetria falhou.");
+
+    // Sempre atualiza o snapshot local (sensores + estado) e envia ao RPi se presente.
+    // Quando o RPi está presente, ELE publica no Firebase — o ESP32 não escreve
+    // direto para evitar escrita duplicada (flag RPI_PRESENT lógica na F2).
+    if (isRpiPresent()) {
+      sendTelemetryToRpi();
+    } else {
+      // Autonomia: sem RPi, o ESP32 publica direto (ou bufferiza offline).
+      if (!publishTelemetry()) {
+        Serial.println("Aviso: publicação de telemetria falhou.");
+      }
     }
   }
 
-  // ── Operações que requerem Firebase online ──
-  if (isWiFiConnected() && Firebase.ready()) {
+  // ── Operações Firebase diretas: SÓ quando o RPi NÃO está presente ──
+  // Com o RPi presente, ele é dono da camada Firebase (comandos chegam via UART,
+  // status/telemetria são publicados por ele). Isso evita escrita duplicada.
+  if (!isRpiPresent() && isWiFiConnected() && Firebase.ready()) {
     // Flush de buffers offline na reconexão
     if (needFlushBuffers) {
       if (flushOfflineBuffers()) {
@@ -108,7 +126,7 @@ void loop() {
       statusPrevMs = now;
       updateStatus();
     }
-  } else {
+  } else if (!isWiFiConnected()) {
     needFlushBuffers = true;
   }
 

@@ -43,7 +43,8 @@ bool initCompass() {
 bool initHardwareSensors() {
   Serial.println("Inicializando sensores de hardware...");
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  Serial2.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  // GPS agora em Serial1 (Serial2 foi dedicada ao link com o RPi na F1)
+  Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
   pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
   pinMode(ULTRASONIC_ECHO_PIN, INPUT);
@@ -127,8 +128,8 @@ void readGPS() {
   static char lineBuffer[GPS_LINE_MAX_LENGTH + 1];
   static uint8_t linePos = 0;
 
-  while (Serial2.available()) {
-    char c = (char)Serial2.read();
+  while (Serial1.available()) {
+    char c = (char)Serial1.read();
 
     if (c == '\n' || c == '\r') {
       if (linePos > 0) {
