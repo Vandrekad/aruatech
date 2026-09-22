@@ -1,4 +1,4 @@
-# USV-AM - Sistema Autônomo de Drone Fluvial
+# Aruatech - Sistema Autônomo de Drone Fluvial
 
 **Status:** Desenvolvimento Ativo (Fase 1: MVP - Sprint F0:F5 | 28/03/2026 - 18/05/2026)  
 **Versão:** 1.0 (Lançamento da Fundação)  
