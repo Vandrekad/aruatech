@@ -71,6 +71,39 @@ void testGPSRead() {
   reportTest("readGPS (executou sem crash)", true);
 }
 
+// ── Ponte GPS -> posição corrente ──────────────────────────────────────────
+// Regressão do bug em que readGPS() só gravava gpsLat/gpsLon e a posição
+// publicada (currentLat/currentLon) nunca saía do default de boot. Não depende
+// de hardware: injeta o resultado de um fix e verifica a promoção feita por
+// updateSensorValues(). Determinístico, roda em bancada sem GPS conectado.
+void testGpsToCurrentBridge() {
+  // 1) COM fix: currentLat/currentLon devem passar a refletir gpsLat/gpsLon.
+  currentLat = -3.1019;   // valores default de boot
+  currentLon = -60.0250;
+  gpsLat = -3.1099;       // "novo fix" bem distinto do default
+  gpsLon = -60.0333;
+  hasGpsFix = true;
+  updateSensorValues();   // readGPS() sem dados não altera gps*; a promoção roda
+  bool promoted = fabs(currentLat - gpsLat) < 1e-9 &&
+                  fabs(currentLon - gpsLon) < 1e-9;
+  Serial.printf("  -> com fix: current=(%.4f,%.4f) gps=(%.4f,%.4f)\n",
+                currentLat, currentLon, gpsLat, gpsLon);
+  reportTest("bridge: fix promove gps->current", promoted);
+
+  // 2) SEM fix: a posição corrente NÃO deve ser sobrescrita (mantém a última boa).
+  currentLat = -3.2000;
+  currentLon = -60.4000;
+  gpsLat = 0.0;           // valor que jamais deve vazar para current sem fix
+  gpsLon = 0.0;
+  hasGpsFix = false;
+  updateSensorValues();
+  bool held = fabs(currentLat - (-3.2000)) < 1e-9 &&
+              fabs(currentLon - (-60.4000)) < 1e-9;
+  Serial.printf("  -> sem fix: current=(%.4f,%.4f) preservado\n",
+                currentLat, currentLon);
+  reportTest("bridge: sem fix preserva current", held);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -84,6 +117,7 @@ void setup() {
   testUltrasonic();
   testMotors();
   testGPSRead();
+  testGpsToCurrentBridge();
 
   Serial.println("========================================");
   Serial.printf(" RESULTADO: %d PASS / %d FAIL\n", testsPassed, testsFailed);

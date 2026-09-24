@@ -3,8 +3,6 @@
 #include <Arduino.h>
 
 void runFirmwareComponentTests();
-bool testWiFi();
-bool testFirebaseConnection();
 bool testLittleFS();
 bool testGPSParsing();
 bool testCompassSensor();

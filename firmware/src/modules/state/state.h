@@ -34,6 +34,12 @@ extern double gpsLon;
 extern double gpsCourse;
 extern bool compassReady;
 
+// Saúde/diagnóstico dos sensores (atualizados na leitura; lidos pelo log).
+extern unsigned long gpsBytesWindow;    // bytes brutos recebidos na última janela
+extern unsigned long gpsNmeaWindow;     // bytes ASCII-NMEA na última janela
+extern bool compassLastReadOk;          // última leitura da bússola teve sucesso
+extern bool ultrasonicHealthy;          // último eco do HC-SR04 foi válido
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Missão e rota
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +53,8 @@ extern int activeLeg;
 extern double routeProgress;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Flag de conectividade (para controle de flush)
+// Âncora de station-keeping (IDLE_HOLDING_POSITION)
 // ─────────────────────────────────────────────────────────────────────────────
-extern bool needFlushBuffers;
+extern double holdLat;
+extern double holdLon;
+extern bool holdAnchored;

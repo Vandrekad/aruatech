@@ -3,6 +3,8 @@
 #include "config.h"
 #include "modules/state/state.h"
 #include "modules/utils/utils.h"
+#include "modules/link/serial_link.h"
+#include "modules/navigation/navigation.h"
 
 void initMotors() {
   ledcSetup(MOTOR_LEFT_CHANNEL, MOTOR_PWM_FREQ, MOTOR_PWM_RES);
@@ -43,8 +45,33 @@ bool initCompass() {
 bool initHardwareSensors() {
   Serial.println("Inicializando sensores de hardware...");
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  // GPS agora em Serial1 (Serial2 foi dedicada ao link com o RPi na F1)
+  // GPS agora em Serial1 (Serial2 foi dedicada ao link com o RPi na F1).
+  // Pull-up no RX mantém nível idle-alto quando o fio do GPS oscila/solta,
+  // evitando que ruído seja lido como bytes (bytes_rx alto, nmea_like=0).
+  pinMode(GPS_RX_PIN, INPUT_PULLUP);
   Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+
+#if GPS_ECHO_RAW
+  // Sonda de baud: testa taxas comuns e conta bytes recebidos em ~1.5s cada.
+  // Se UMA delas conta > 0 e as outras 0, essa é a taxa real do modulo.
+  {
+    const uint32_t bauds[] = {9600, 38400, 115200};
+    Serial.printf("[GPS-PROBE] sondando baud no GPIO%d (TX do GPS)...\n", GPS_RX_PIN);
+    for (uint8_t b = 0; b < 3; b++) {
+      Serial1.begin(bauds[b], SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+      delay(50);
+      while (Serial1.available()) Serial1.read();   // descarta lixo de troca
+      unsigned long t = millis();
+      unsigned long n = 0;
+      while (millis() - t < 1500) {
+        if (Serial1.available()) { Serial1.read(); n++; }
+      }
+      Serial.printf("[GPS-PROBE] baud=%lu -> %lu bytes\n", (unsigned long)bauds[b], n);
+    }
+    // Restaura o baud de operacao configurado.
+    Serial1.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  }
+#endif
 
   pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
   pinMode(ULTRASONIC_ECHO_PIN, INPUT);
@@ -82,8 +109,11 @@ void readUltrasonic() {
   if (duration > 0) {
     int measured = (int)(duration * 0.034 / 2.0);
     obsDist = min(ULTRASONIC_MAX_CM, measured);
+    ultrasonicHealthy = true;
+  } else {
+    // duration == 0 (timeout): sem eco válido. Mantém último valor, marca falha.
+    ultrasonicHealthy = false;
   }
-  // Se duration == 0 (timeout), mantém último valor válido
 }
 
 bool readCompass() {
@@ -130,6 +160,16 @@ void readGPS() {
 
   while (Serial1.available()) {
     char c = (char)Serial1.read();
+    gpsBytesWindow++;
+    // Conta bytes que PODEM ser NMEA (ASCII imprimível ou CR/LF). Se este contador
+    // fica em 0 enquanto gpsBytesWindow sobe, o que chega é RUÍDO elétrico (pino
+    // flutuante), não sinal de GPS. Os contadores são zerados pelo log periódico.
+    bool printableAscii = (c >= 0x20 && c <= 0x7E) || c == '\n' || c == '\r';
+    if (printableAscii) gpsNmeaWindow++;
+#if GPS_ECHO_RAW
+    // Dump bruto de NMEA — só atrás do flag de debug. Ecoa só ASCII imprimível.
+    if (printableAscii) Serial.write(c);
+#endif
 
     if (c == '\n' || c == '\r') {
       if (linePos > 0) {
@@ -191,8 +231,67 @@ void readGPS() {
 
 void updateSensorValues() {
   readGPS();
-  if (!readCompass() && hasGpsFix) {
+  // Promove a leitura do GPS para a posição corrente. currentLat/currentLon são
+  // o que a telemetria (position), o status (last_position), o link com o RPi e
+  // toda a navegação (LOS, hold-position) consomem — sem esta cópia, a posição
+  // publicada no Firebase nunca sai dos valores default de boot.
+  if (hasGpsFix) {
+    currentLat = gpsLat;
+    currentLon = gpsLon;
+  }
+  // Bússola: usa curso do GPS como fallback quando a leitura falha.
+  compassLastReadOk = readCompass();
+  if (!compassLastReadOk && hasGpsFix) {
     currentHeading = gpsCourse;
   }
   readUltrasonic();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Log estruturado periódico — substitui os [GPS-DIAG]/dump bruto dispersos.
+// Reaproveita o estado já lido; não toca no hardware.
+// ─────────────────────────────────────────────────────────────────────────────
+void printStatusBlock() {
+  // Saúde do GPS: precisa de bytes chegando E fix para estar "OK".
+  const char *gpsHealth =
+      (gpsBytesWindow == 0)        ? "SEM SINAL (0 bytes — verificar fio/energia)" :
+      (gpsNmeaWindow == 0)         ? "RUIDO (bytes sem NMEA — pino/baud)" :
+      hasGpsFix                    ? "OK (fix)" : "SEM FIX (recebendo, aguardando satelites)";
+
+  Serial.println(F("┌──────────────── USV STATUS ────────────────"));
+  // 1. Sensores OK/FALHA
+  Serial.printf("│ GPS      : %s\n", gpsHealth);
+  Serial.printf("│ Bussola  : %s\n", compassReady ? (compassLastReadOk ? "OK" : "FALHA leitura")
+                                                   : "FALHA (nao inicializou)");
+  Serial.printf("│ Ultrassom: %s\n", ultrasonicHealthy ? "OK" : "FALHA (sem eco)");
+  // 2. Localização + fix
+  if (hasGpsFix) {
+    Serial.printf("│ Posicao  : lat=%.6f lon=%.6f  FIX=SIM\n", currentLat, currentLon);
+  } else {
+    Serial.printf("│ Posicao  : --- (sem fix)          FIX=NAO\n");
+  }
+  // 3. Distância do ultrassônico
+  if (ultrasonicHealthy) {
+    Serial.printf("│ Obstaculo: %d cm\n", obsDist);
+  } else {
+    Serial.printf("│ Obstaculo: --- (sem leitura valida)\n");
+  }
+  // 4. Link com o Raspberry Pi
+  Serial.printf("│ Link RPi : %s\n", isRpiPresent() ? "CONECTADO" : "AUSENTE (buffer local)");
+  // 5. Rumo (desvio em relação ao Norte)
+  if (compassLastReadOk) {
+    Serial.printf("│ Rumo     : %.1f graus (bussola)\n", currentHeading);
+  } else if (hasGpsFix) {
+    Serial.printf("│ Rumo     : %.1f graus (curso GPS, bussola em falha)\n", currentHeading);
+  } else {
+    Serial.printf("│ Rumo     : --- (sem bussola nem fix)\n");
+  }
+  // Extra: estado de navegação e diagnóstico de bytes do GPS na janela.
+  Serial.printf("│ Nav      : %s | gps_rx=%lu nmea=%lu\n",
+                navStateToString(currentState), gpsBytesWindow, gpsNmeaWindow);
+  Serial.println(F("└─────────────────────────────────────────────"));
+
+  // Zera os contadores de janela do GPS para a próxima amostragem.
+  gpsBytesWindow = 0;
+  gpsNmeaWindow = 0;
 }

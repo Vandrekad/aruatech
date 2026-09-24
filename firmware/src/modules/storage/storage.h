@@ -3,14 +3,19 @@
 #include <Arduino.h>
 #include <vector>
 #include <ArduinoJson.h>
-#include <Firebase_ESP_Client.h>
+
+// Armazenamento local (LittleFS). Arquitetura dual: o ESP32 NÃO fala Firebase.
+// Quando o RPi está ausente, a telemetria é bufferizada localmente aqui; o RPi,
+// ao reconectar, drena o buffer via UART e o publica no Firebase.
 
 bool initFileSystem();
 bool appendLineToFile(const char *path, const String &line);
 bool readFileLines(const char *path, std::vector<String> &lines);
 bool writeFileLines(const char *path, const std::vector<String> &lines);
-bool bufferTelemetryOffline(FirebaseJson &telemetryJson);
+
+// Bufferiza um snapshot da telemetria atual (estado + sensores) em LittleFS,
+// como uma linha JSON. Usada quando o RPi não está presente.
+bool bufferTelemetryLocal();
+
+// Bufferiza um ponto de trajetória (lat/lon/ts) em LittleFS.
 bool bufferPathPointOffline(double lat, double lon, unsigned long ts);
-bool flushTelemetryBuffer();
-bool flushPathBuffer();
-bool flushOfflineBuffers();

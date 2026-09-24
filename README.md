@@ -305,6 +305,31 @@ graph TD
 - Firebase RTDB + Firebase Auth
 - Bibliotecas de GPS e sensores (TinyGPS++, drivers I2C/GPIO)
 
+### 4.5 Pinagem canonica do ESP32 (fonte de verdade: `firmware/src/config.h`)
+
+Esta tabela reflete os `#define` reais do firmware. Alterou o `config.h`? Atualize aqui tambem.
+
+| Periferico | Sinal | GPIO ESP32 | Interface | Baud / Obs |
+|---|---|---|---|---|
+| **Link Raspberry Pi 4** | RX2 | **16** | UART2 (`Serial2`) | 115200 · recebe do TX do RPi (GPIO14) |
+| | TX2 | **17** | UART2 (`Serial2`) | 115200 · envia ao RX do RPi (GPIO15) |
+| **GPS NEO-6M** | RX1 | **4** | UART1 (`Serial1`) | 9600 · I/O c/ pull-up · le o TX do GPS (unico fio que importa) |
+| | TX1 | **13** | UART1 (`Serial1`) | 9600 · I/O safe · saida ao RX do GPS (raramente usado) |
+| **Bussola HMC5883L** | SDA | **21** | I2C | endereco `0x1E` |
+| | SCL | **22** | I2C | |
+| **Ultrassonico HC-SR04** | Trig | **5** | GPIO out | I/O safe (era 4/ADC2) |
+| | Echo | **35** | GPIO in | ADC1 input-only · **5V → usar divisor 1k/2k para 3.3V** |
+| **Motor esquerdo** | PWM-L | **32** | LEDC ch0 | 5 kHz, 8 bits → IN driver ponte H |
+| **Motor direito** | PWM-R | **33** | LEDC ch1 | 5 kHz, 8 bits → IN driver ponte H |
+
+**Regras de montagem (protoboard):**
+- **GND unico** entre bateria, regulador, RPi, ESP32, driver e sensores — sem isso o UART/I2C nao tem referencia.
+- **UART cruzado** ESP↔RPi (TX↔RX), 3.3V direto, sem conversor de nivel.
+- **Motores alimentados direto da bateria** (nunca pela trilha 5V da logica — picos resetam o ESP).
+- **Echo do HC-SR04** via divisor de tensao (5V→3.3V) antes do GPIO 35.
+
+Diagrama de fiacao imprimivel: `docs/fiacao-usv.svg`.
+
 ## 5. Manual de Execucao por Camada (Sequencial)
 
 ## 5.0 Etapa comum (obrigatoria para iniciar)

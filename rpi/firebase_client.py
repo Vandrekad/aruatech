@@ -152,7 +152,7 @@ class FirebasePublisher:
         self.b.set_json(f"/drones/{tid}/telemetry", {
             "timestamp": msg.get("ts"),
             "mission_id": msg.get("mission_id", ""),
-            "position": {"lat": msg.get("lat"), "lon": msg.get("lon"), "heading": msg.get("hdg")},
+            "position": {"lat": msg.get("lat"), "lon": msg.get("lon"), "heading": msg.get("hdg"), "fix": msg.get("fix", False)},
             "sensors": {"battery_mv": msg.get("bat"), "obs_dist": msg.get("obs")},
             "actuators": {"thrust_l": msg.get("thrust_l"), "thrust_r": msg.get("thrust_r")},
         })

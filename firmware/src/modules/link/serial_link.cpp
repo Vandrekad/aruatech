@@ -51,6 +51,7 @@ void sendTelemetryToRpi() {
   doc["ts"] = (uint32_t)(millis() / 1000);
   doc["lat"] = currentLat;
   doc["lon"] = currentLon;
+  doc["fix"] = hasGpsFix;
   doc["hdg"] = currentHeading;
   doc["obs"] = obsDist;
   doc["bat"] = batteryMv;

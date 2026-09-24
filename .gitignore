@@ -1,1 +1,13 @@
 .idea
+com3_capture.txt
+docs/apresentacao-migracao.html
+docs/apresentacao-migracao.pptx
+docs/arquitetura.svg
+docs/aruatech-logo.png
+docs/fiacao-usv.svg
+docs/gerar_pptx.py
+docs/lib/reveal.css
+docs/lib/reveal.js
+docs/lib/theme.css
+
+rpi/__pycache__

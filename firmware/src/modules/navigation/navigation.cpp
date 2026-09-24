@@ -1,13 +1,17 @@
 #include "modules/navigation/navigation.h"
-#include "modules/net/wifi_manager.h"
+#include "modules/navigation/navigation.h"
 #include "modules/utils/utils.h"
-#include "modules/net/firebase_manager.h"
 #include "modules/state/state.h"
 #include "modules/sensors/sensors.h"
+#include "modules/commands/commands.h"
+#include "modules/link/serial_link.h"
 #include "config.h"
 
 static unsigned long obstacleAvoidanceStartMs = 0;
 static NavState previousNavState = IDLE_HOLDING_POSITION;
+
+// Forward declaration (definida mais abaixo, usada por updateLOSControl).
+void updateHoldPosition();
 
 const char* navStateToString(NavState state) {
   switch (state) {
@@ -56,9 +60,7 @@ static void enterObstacleAvoidance() {
     currentState = OBSTACLE_AVOIDANCE;
     obstacleAvoidanceStartMs = millis();
     Serial.println("OBSTACLE_AVOIDANCE ativado.");
-    if (isWiFiConnected() && Firebase.ready()) {
-      updateStatus();
-    }
+    sendEventToRpi("obstacle_detected", (double)obsDist);
   }
 }
 
@@ -87,6 +89,15 @@ double computeLOSHeading(double fromLat, double fromLon, double toLat, double to
 }
 
 void updateLOSControl() {
+  // GATE DE PRONTIDÃO: sem GPS fix não há posição confiável — motores DESLIGADOS
+  // e nenhuma navegação. Isso protege contra sair navegando com a posição default
+  // de boot antes do primeiro fix. A missão só progride quando isSystemReady().
+  if (!isSystemReady()) {
+    thrustL = 0;
+    thrustR = 0;
+    return;
+  }
+
   if (currentState == NAVIGATING_TO_GOAL || currentState == RETURNING_TO_HOME) {
     // Verificar obstáculo
     if (obsDist <= OBSTACLE_THRESHOLD_CM) {
@@ -96,6 +107,29 @@ void updateLOSControl() {
 
     double targetLat = (currentState == NAVIGATING_TO_GOAL) ? goalLat : homeLat;
     double targetLon = (currentState == NAVIGATING_TO_GOAL) ? goalLon : homeLon;
+
+    // Distância ao alvo e progresso da rota (atualizados a cada ciclo de controle).
+    double distToTarget = computeDistanceMeters(currentLat, currentLon, targetLat, targetLon);
+    remainingDistanceMeters = distToTarget;
+    if (routeDistanceMeters > 1e-6) {
+      routeProgress = constrain(1.0 - (distToTarget / routeDistanceMeters), 0.0, 1.0);
+    }
+
+    // ── Chegada ── dentro do raio de chegada: fecha a missão e mantém posição.
+    // Só declara chegada com GPS fix — sem fix, a posição pode estar defasada e
+    // gerar chegada falsa; nesse caso segue navegando com a melhor estimativa.
+    if (hasGpsFix && distToTarget <= ARRIVAL_RADIUS_METERS) {
+      thrustL = 0;
+      thrustR = 0;
+      remainingDistanceMeters = 0.0;
+      routeProgress = 1.0;
+      bool wasReturn = (currentState == RETURNING_TO_HOME);
+      Serial.printf("[NAV] Alvo alcançado (%.1fm). Missão concluída.\n", distToTarget);
+      sendEventToRpi(wasReturn ? "return_completed" : "mission_completed", distToTarget);
+      // Muda para hold ativo — setNavState ancora a posição atual (o alvo).
+      setNavState(IDLE_HOLDING_POSITION);
+      return;
+    }
 
     // Usar posição atual como ponto de partida para LOS
     // (idealmente seria WP_i da perna atual, mas no MVP com rota ponto-a-ponto é equivalente)
@@ -125,10 +159,74 @@ void updateLOSControl() {
     }
 
   } else {
-    // BUG FIX #4: Em IDLE ou qualquer outro estado, PARAR os motores
+    // IDLE_HOLDING_POSITION (e qualquer estado remanescente): manter posição.
+    updateHoldPosition();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Station-keeping: âncora de posição para IDLE_HOLDING_POSITION
+// ─────────────────────────────────────────────────────────────────────────────
+void setHoldAnchor(double lat, double lon) {
+  holdLat = lat;
+  holdLon = lon;
+  holdAnchored = true;
+  Serial.printf("[HOLD] Âncora fixada em %.6f, %.6f\n", lat, lon);
+}
+
+void clearHoldAnchor() {
+  holdAnchored = false;
+}
+
+// Prontidão para navegar. No MVP o único requisito bloqueante é GPS com fix.
+bool isSystemReady() {
+  return hasGpsFix;
+}
+
+// Mantém a embarcação sobre a âncora contra a correnteza. Só atua com GPS fix:
+// sem posição confiável, PARAR os motores é o comportamento seguro (não sair
+// correndo atrás de uma âncora com base numa posição estimada/desatualizada).
+void updateHoldPosition() {
+  // Sem fix → seguro: motores parados (comportamento antigo do IDLE).
+  if (!hasGpsFix) {
     thrustL = 0;
     thrustR = 0;
+    return;
   }
+
+  // Auto-ancoragem: em IDLE com fix mas ainda sem âncora (boot, ou fix recém
+  // recuperado), fixa a posição atual. Cobre o estado inicial, que não passa
+  // por setNavState().
+  if (!holdAnchored && currentState == IDLE_HOLDING_POSITION) {
+    setHoldAnchor(currentLat, currentLon);
+  }
+
+  if (!holdAnchored) {
+    thrustL = 0;
+    thrustR = 0;
+    return;
+  }
+
+  double drift = computeDistanceMeters(currentLat, currentLon, holdLat, holdLon);
+
+  // Dentro da banda morta: considera-se "no lugar", não gasta bateria corrigindo.
+  if (drift <= HOLD_DEADBAND_METERS) {
+    thrustL = 0;
+    thrustR = 0;
+    return;
+  }
+
+  // Fora do raio: apontar de volta para a âncora e empurrar proporcionalmente.
+  double desiredHeading = computeLOSHeading(currentLat, currentLon, holdLat, holdLon);
+  double error = headingErrorDeg(desiredHeading, currentHeading);
+  int correction = (int)(error * HOLD_HEADING_GAIN);
+
+  // Empuxo base cresce com o desvio, saturado no teto de segurança.
+  int base = HOLD_BASE_THRUST + (int)((drift - HOLD_DEADBAND_METERS) * 6.0);
+  base = constrain(base, HOLD_BASE_THRUST, HOLD_MAX_THRUST);
+
+  thrustL = constrain(base + correction, 0, HOLD_MAX_THRUST);
+  thrustR = constrain(base - correction, 0, HOLD_MAX_THRUST);
 }
 
 void advanceTowards(double destLat, double destLon, double stepMeters) {

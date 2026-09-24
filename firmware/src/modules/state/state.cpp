@@ -24,6 +24,12 @@ double gpsLon = -60.0250;
 double gpsCourse = 0.0;
 bool compassReady = false;
 
+// Saúde/diagnóstico dos sensores
+unsigned long gpsBytesWindow = 0;
+unsigned long gpsNmeaWindow = 0;
+bool compassLastReadOk = false;
+bool ultrasonicHealthy = false;
+
 // Missão e rota
 double goalLat = -3.1019;
 double goalLon = -60.0250;
@@ -34,5 +40,7 @@ double remainingDistanceMeters = 0.0;
 int activeLeg = 0;
 double routeProgress = 0.0;
 
-// Flag de conectividade
-bool needFlushBuffers = true;
+// Âncora de station-keeping (IDLE_HOLDING_POSITION)
+double holdLat = 0.0;
+double holdLon = 0.0;
+bool holdAnchored = false;

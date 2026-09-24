@@ -2,7 +2,6 @@
 #include <ArduinoJson.h>
 #include <mbedtls/sha256.h>
 #include <vector>
-#include <Firebase_ESP_Client.h>
 
 #include "modules/state/state.h"
 
@@ -74,49 +73,4 @@ String computeLocalPathHash(const std::vector<String> &lines) {
     doc.clear();
   }
   return computeSHA256Hex(concatenated);
-}
-
-bool computeRTDBPathHash(const String &missionId, String &hash, FirebaseData &fbdo) {
-  if (missionId.length() == 0) {
-    return false;
-  }
-  String path = "/missions/" + missionId + "/path";
-  if (!Firebase.RTDB.getJSON(&fbdo, path.c_str())) {
-    return false;
-  }
-  String raw = fbdo.jsonString();
-  if (raw.length() == 0) {
-    return false;
-  }
-
-  // ArduinoJson v7: usar JsonDocument
-  JsonDocument doc;
-  auto error = deserializeJson(doc, raw);
-  if (error || !doc.is<JsonObject>()) {
-    return false;
-  }
-
-  std::vector<String> keys;
-  keys.reserve(10);
-  for (JsonPair kv : doc.as<JsonObject>()) {
-    keys.push_back(String(kv.key().c_str()));
-  }
-  std::sort(keys.begin(), keys.end());
-
-  String concat;
-  int count = min((int)keys.size(), 5);
-  for (int i = 0; i < count; i++) {
-    JsonObject item = doc[keys[i]].as<JsonObject>();
-    if (!item.isNull()) {
-      double lat = item["lat"] | 0.0;
-      double lon = item["lon"] | 0.0;
-      unsigned long ts = item["ts"] | 0UL;
-      concat += String(lat, 6) + "," + String(lon, 6) + "," + String(ts) + ";";
-    }
-  }
-  if (concat.length() == 0) {
-    return false;
-  }
-  hash = computeSHA256Hex(concat);
-  return true;
 }

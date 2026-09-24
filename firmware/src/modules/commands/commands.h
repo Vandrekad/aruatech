@@ -13,6 +13,4 @@ struct DroneCommand {
 };
 
 void setNavState(NavState newState);
-bool fetchCommand(DroneCommand &command);
 void handleCommand(const DroneCommand &command);
-void processCommand();

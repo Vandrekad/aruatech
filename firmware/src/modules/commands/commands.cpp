@@ -1,50 +1,29 @@
 #include "modules/commands/commands.h"
-#include "modules/net/wifi_manager.h"
-#include "modules/net/firebase_manager.h"
 #include "modules/state/state.h"
 #include "modules/navigation/navigation.h"
+#include "modules/link/serial_link.h"
 
-bool fetchCommand(DroneCommand &command) {
-  String commandPath = "/drones/" + droneId + "/command";
-  if (!Firebase.RTDB.getJSON(&fbdo, commandPath.c_str())) {
-    // Não logar em cada polling — muito ruidoso. Só se for erro real.
-    if (fbdo.errorReason() != "path not exist" && fbdo.errorReason().length() > 0) {
-      Serial.print("Erro lendo comando: ");
-      Serial.println(fbdo.errorReason());
-    }
-    return false;
-  }
-
-  FirebaseJson &result = fbdo.to<FirebaseJson>();
-  FirebaseJsonData data;
-  if (!result.get(data, "command_id")) {
-    return false;
-  }
-
-  command.commandId = data.stringValue;
-  if (command.commandId.length() == 0 || command.commandId == lastCommandId) {
-    return false;
-  }
-
-  if (result.get(data, "cmd_type")) command.type = data.stringValue;
-  if (result.get(data, "mission_id")) command.missionId = data.stringValue;
-  if (result.get(data, "issued_at")) command.issuedAt = data.intValue;
-  if (result.get(data, "target/lat")) command.targetLat = data.doubleValue;
-  if (result.get(data, "target/lon")) command.targetLon = data.doubleValue;
-
-  return true;
-}
+// Arquitetura dual: os comandos NÃO vêm mais do Firebase. O RPi é dono da nuvem
+// e repassa set_destination/emergency_stop ao ESP32 por UART (ver serial_link.cpp,
+// que chama handleCommand()). fetchCommand()/processCommand() (polling RTDB) foram
+// removidos junto com a dependência de WiFi/Firebase.
 
 void setNavState(NavState newState) {
   if (newState == currentState) {
     return;
   }
   currentState = newState;
+  // Station-keeping: ao entrar em IDLE, fixa a posição atual como âncora;
+  // ao sair, libera a âncora para não interferir na navegação.
+  if (newState == IDLE_HOLDING_POSITION) {
+    setHoldAnchor(currentLat, currentLon);
+  } else {
+    clearHoldAnchor();
+  }
   Serial.print("Nav state alterado para: ");
   Serial.println(navStateToString(currentState));
-  if (isWiFiConnected() && Firebase.ready()) {
-    updateStatus();
-  }
+  // Notifica o RPi da mudança de estado por UART (ele publica no Firebase).
+  sendEventToRpi("nav_state_changed", (double)newState);
 }
 
 void handleCommand(const DroneCommand &command) {
@@ -52,6 +31,15 @@ void handleCommand(const DroneCommand &command) {
   Serial.println(command.type);
 
   if (command.type == "set_destination") {
+    // Gate de prontidão: não inicia navegação sem GPS fix válido. O comando é
+    // reconhecido (lastCommandId atualizado no fim), mas a missão não começa —
+    // o drone permanece em IDLE com motores desligados até haver fix.
+    if (!isSystemReady()) {
+      Serial.println("set_destination RECUSADO: aguardando GPS fix.");
+      sendEventToRpi("command_rejected_no_fix", 0.0);
+      lastCommandId = command.commandId;
+      return;
+    }
     activeMissionId = command.missionId;
     homeLat = currentLat;
     homeLon = currentLon;
@@ -81,11 +69,4 @@ void handleCommand(const DroneCommand &command) {
   }
 
   lastCommandId = command.commandId;
-}
-
-void processCommand() {
-  DroneCommand command;
-  if (fetchCommand(command)) {
-    handleCommand(command);
-  }
 }

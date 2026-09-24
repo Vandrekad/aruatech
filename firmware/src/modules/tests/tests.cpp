@@ -1,8 +1,6 @@
 #include "modules/tests/tests.h"
 #include <LittleFS.h>
 #include "config.h"
-#include "modules/net/wifi_manager.h"
-#include "modules/net/firebase_manager.h"
 #include "modules/storage/storage.h"
 #include "modules/sensors/sensors.h"
 #include "modules/navigation/navigation.h"
@@ -18,8 +16,6 @@ static void printComponentTestResult(const char* component, bool result) {
 
 void runFirmwareComponentTests() {
   Serial.println("=== INÍCIO DO APLICATIVO DE TESTES DE COMPONENTES ===");
-  printComponentTestResult("Wi-Fi", testWiFi());
-  printComponentTestResult("Firebase RTDB", testFirebaseConnection());
   printComponentTestResult("LittleFS", testLittleFS());
   printComponentTestResult("GPS parsing / fix", testGPSParsing());
   printComponentTestResult("Bússola HMC5883L", testCompassSensor());
@@ -28,37 +24,6 @@ void runFirmwareComponentTests() {
   printComponentTestResult("Geração de rota básica", testRouteGeneration());
   printComponentTestResult("Buffer offline simples", testOfflineBuffering());
   Serial.println("=== FIM DO APLICATIVO DE TESTES DE COMPONENTES ===");
-}
-
-bool testWiFi() {
-  Serial.println("Testando conexão Wi-Fi...");
-  unsigned long start = millis();
-  while (!isWiFiConnected() && millis() - start < 8000) {
-    manageWiFi();
-    delay(500);
-  }
-  if (isWiFiConnected()) {
-    Serial.print("Wi-Fi conectado: ");
-    Serial.println(WiFi.localIP());
-    return true;
-  }
-  Serial.println("Não foi possível conectar ao Wi-Fi dentro do timeout.");
-  return false;
-}
-
-bool testFirebaseConnection() {
-  Serial.println("Testando conexão Firebase RTDB...");
-  if (!Firebase.ready()) {
-    Serial.println("Firebase ainda não está pronto. Aguardando 3s...");
-    delay(3000);
-  }
-  if (Firebase.ready()) {
-    Serial.println("Firebase RTDB está pronto para uso.");
-    return true;
-  }
-  Serial.print("Firebase falhou: ");
-  Serial.println(fbdo.errorReason());
-  return false;
 }
 
 bool testLittleFS() {
@@ -189,9 +154,7 @@ bool testOfflineBuffering() {
   if (LittleFS.exists(testTelem)) LittleFS.remove(testTelem);
   if (LittleFS.exists(testPath)) LittleFS.remove(testPath);
 
-  FirebaseJson telemetryJson;
-  telemetryJson.set("test", "offline");
-  bool ok1 = appendLineToFile(testTelem, telemetryJson.raw());
+  bool ok1 = appendLineToFile(testTelem, "{\"test\":\"offline\"}");
   bool ok2 = appendLineToFile(testPath, "{\"lat\":0.0,\"lon\":0.0,\"ts\":0}");
 
   std::vector<String> lines;
