@@ -4,6 +4,10 @@ Documentation=file:///home/vandrekad/aruatech/rpi/README.md
 # So sobe apos a rede estar pronta (Firebase precisa de conectividade)
 After=network-online.target
 Wants=network-online.target
+# StartLimit* vão em [Unit] (systemd >= v230). Evita loop de crash apertado:
+# 5 falhas em 60s => para e espera intervencao manual.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -20,12 +24,9 @@ ExecStart=/home/vandrekad/aruatech/rpi/.venv/bin/python \
     --database-url https://usvs-drone-fluvial-autonomo-default-rtdb.firebaseio.com/ \
     --drone-id drone_01
 
-# Resiliencia: reinicia sempre que cair, com backoff. StartLimit evita loop de crash
-# apertado (5 falhas em 60s => para e espera intervencao).
+# Resiliencia: reinicia sempre que cair, com backoff.
 Restart=always
 RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # Logs vao para o journald (stdout/stderr). Rotacao pelo journald (ver README).
 StandardOutput=journal

@@ -56,11 +56,26 @@ class SerialBridge:
         self.port = port
 
     def open(self) -> None:
-        self._ser = serial.Serial(self.port, self.baud, timeout=0.2)
+        # Abre a porta SEM pulsar DTR/RTS. Por padrão a pyserial afirma DTR/RTS ao
+        # abrir, e no CP2102/CH340 esses sinais estão ligados ao EN/BOOT do ESP32
+        # -> abrir a porta RESETA a placa. Em serviço (o daemon reabre a cada
+        # reconexão) isso vira boot-loop. Construímos com port=None, zeramos
+        # dtr/rts e só então abrimos, mantendo o ESP32 rodando.
+        ser = serial.Serial()
+        ser.port = self.port
+        ser.baudrate = self.baud
+        ser.timeout = 0.2
+        try:
+            ser.dtr = False
+            ser.rts = False
+        except Exception:
+            pass  # alguns drivers não expõem os sinais; segue sem resetar
+        ser.open()
+        self._ser = ser
         self._stop.clear()
         self._rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
         self._rx_thread.start()
-        print(f"[BRIDGE] Aberto {self.port} @ {self.baud}")
+        print(f"[BRIDGE] Aberto {self.port} @ {self.baud} (sem reset DTR/RTS)")
 
     def close(self) -> None:
         self._stop.set()

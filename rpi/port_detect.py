@@ -80,13 +80,24 @@ def probe_port(dev: str, baud: int = 115200, timeout_s: float = 2.0) -> bool:
     """
     ser = None
     try:
-        ser = serial.Serial(dev, baud, timeout=0.2)
+        # Abre SEM pulsar DTR/RTS (senão reseta o ESP32 — ver serial_bridge.open).
+        ser = serial.Serial()
+        ser.port = dev
+        ser.baudrate = baud
+        ser.timeout = 0.2
+        try:
+            ser.dtr = False
+            ser.rts = False
+        except Exception:
+            pass
+        ser.open()
     except Exception:
         return False
 
     try:
-        # Dê um instante caso a abertura tenha disparado o auto-reset do ESP32
-        # (DTR/RTS pulsam no CP2102/CH340 e reiniciam a placa).
+        # Sem o reset, o ESP32 já está rodando e emite telemetria sozinha a cada
+        # ~2s (envio proativo). Não precisamos nem do ping — mas mandamos mesmo
+        # assim para acelerar a deteccao com um pong imediato.
         time.sleep(0.3)
         try:
             ser.reset_input_buffer()
