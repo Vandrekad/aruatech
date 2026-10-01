@@ -65,6 +65,8 @@ class RpiDaemon:
         self._last_esp32_msg = 0.0
         self._link_up = False
         self._rx_count = 0
+        self._pending_cmds: list[dict] = []   # comandos recebidos com o link caído
+        self._pending_lock = threading.Lock()
         self._reconnect_backoff = RECONNECT_BACKOFF_START_S
         self._silence_alerted = False
         self._hb_thread: threading.Thread | None = None
@@ -100,6 +102,30 @@ class RpiDaemon:
 
     # ── RTDB -> ESP32 ────────────────────────────────────────────────
     def on_rtdb_command(self, command: dict) -> None:
+        # Esta função roda na thread do LISTENER do Firebase. Se uma exceção
+        # escapar daqui, o firebase-admin MATA essa thread (foi o bug: um
+        # set_destination chegou antes do link abrir, send_command lançou
+        # RuntimeError, a thread morreu e o RPi nunca mais repassou comandos ao
+        # ESP32 — telemetria subia, mas o barco não recebia orientação).
+        # Portanto: NADA pode propagar. Se o link está caído, ENFILEIRAMOS o
+        # comando e o watchdog o drena quando o link reabrir.
+        try:
+            if not self._link_up:
+                with self._pending_lock:
+                    self._pending_cmds.append(command)
+                log.warning("comando recebido com link caido — enfileirado (cmd=%s)",
+                            command.get("cmd_type") or command.get("cmd"))
+                return
+            self._dispatch_command(command)
+        except Exception as exc:
+            # Nunca deixa a thread do listener morrer. Enfileira para re-tentar.
+            with self._pending_lock:
+                self._pending_cmds.append(command)
+            log.error("falha ao repassar comando (enfileirado p/ retry): %s", exc)
+            self._link_up = False  # força o watchdog a reabrir/re-detectar
+
+    def _dispatch_command(self, command: dict) -> None:
+        """Repasse efetivo de um comando ao ESP32 pela bridge."""
         cmd = command.get("cmd_type") or command.get("cmd")
         cid = command.get("command_id", "")
         mid = command.get("mission_id", "")
@@ -114,6 +140,24 @@ class RpiDaemon:
             log.info("comando emergency_stop repassado (cid=%s)", cid)
         else:
             log.warning("comando desconhecido ignorado: %s", cmd)
+
+    def _drain_pending_commands(self) -> None:
+        """Envia os comandos que chegaram com o link caído. Chamado pelo
+        watchdog assim que o link está de pé de novo."""
+        with self._pending_lock:
+            if not self._pending_cmds:
+                return
+            pending = self._pending_cmds
+            self._pending_cmds = []
+        for command in pending:
+            try:
+                self._dispatch_command(command)
+            except Exception as exc:
+                log.error("falha ao drenar comando pendente (re-enfileirado): %s", exc)
+                with self._pending_lock:
+                    self._pending_cmds.insert(0, command)
+                self._link_up = False
+                return  # para de drenar; tenta de novo no próximo tick
 
     # ── watchdog do link serial (F3) ─────────────────────────────────
     def _open_link(self) -> bool:
@@ -145,6 +189,7 @@ class RpiDaemon:
             self._reconnect_backoff = RECONNECT_BACKOFF_START_S
             self._last_esp32_msg = self._clock()
             log.info("link serial aberto")
+            self._drain_pending_commands()  # envia o que chegou com o link caído
             return True
         except Exception as exc:
             self._link_up = False
