@@ -7,6 +7,7 @@
 #include "modules/state/state.h"
 #include "modules/link/serial_link.h"
 #include "modules/tests/tests.h"
+#include "modules/display/display.h"
 
 // Flag para ativar o app de testes de componentes (desliga missão normal)
 static const bool enableComponentTestApp = false;
@@ -36,11 +37,24 @@ void setup() {
   // 2. Sensores de hardware
   initHardwareSensors();
 
+  // 2b. OLED SSD1306 (HUD de status). Usa o barramento I2C já iniciado nos
+  //     sensores. Opcional: se ausente, o firmware segue normal sem display.
+  initDisplay();
+
   // 3. Link serial com o Raspberry Pi 4.
   //    Arquitetura dual: o RPi é dono da camada de nuvem (WiFi/Firebase). O ESP32
   //    NÃO fala WiFi/Firebase — publica tudo por UART e navega de forma autônoma
   //    mesmo sem o RPi. Comandos (set_destination/emergency_stop) chegam só por aqui.
   initSerialLink();
+
+  // 3b. Botão físico de calibração/self-test (GPIO com pull-up interno; aperta
+  //     para GND). Pressão curta = self-test; longa = recalibrar bússola.
+  pinMode(CAL_BUTTON_PIN, INPUT_PULLUP);
+
+  // 3c. Verificação e calibração dos sensores no BOOT. O self-test sempre roda; a
+  //     calibração da bússola só roda se NAO houver calibração salva (senão o boot
+  //     travaria 25s girando). Use o botão (pressão longa) para recalibrar depois.
+  runCalibrationAndCheck(false);
 
   // 4. Testes (se habilitados)
   if (enableComponentTestApp) {
@@ -51,6 +65,54 @@ void setup() {
 }
 
 void loop() {
+  // ── Comandos de manutenção pelo monitor serial (USB) ──
+  // 'cal'/'calibrar' = recalibra a bússola; 'test'/'selftest' = só verifica sensores.
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.equalsIgnoreCase("cal") || cmd.equalsIgnoreCase("calibrar")) {
+      runCalibrationAndCheck(true);   // força recalibração
+    } else if (cmd.equalsIgnoreCase("test") || cmd.equalsIgnoreCase("selftest")) {
+      displayShowSelfTest();          // mostra "VERIFICANDO..." no OLED
+      bool ok = runSensorSelfTest();
+      displayShowCalResult(ok, false);
+    }
+  }
+
+  // ── Botão físico de calibração/self-test (GPIO com pull-up: LOW = apertado) ──
+  // Debounce + detecção por borda; segurar não redispara. Pressão CURTA = self-test;
+  // pressão LONGA (>= CAL_BUTTON_LONGPRESS_MS) = recalibrar a bússola.
+  {
+    static bool btnStable = false;        // true = apertado (debounced)
+    static bool btnLastRaw = false;
+    static unsigned long btnEdgeMs = 0;   // instante da última mudança de leitura crua
+    static unsigned long btnPressStartMs = 0;
+
+    bool raw = (digitalRead(CAL_BUTTON_PIN) == LOW);  // LOW = apertado
+    unsigned long now = millis();
+
+    if (raw != btnLastRaw) {              // leitura mudou → inicia janela de debounce
+      btnLastRaw = raw;
+      btnEdgeMs = now;
+    } else if (now - btnEdgeMs >= CAL_BUTTON_DEBOUNCE_MS && raw != btnStable) {
+      // Leitura estável por mais que o debounce → aceita a transição.
+      btnStable = raw;
+      if (btnStable) {
+        btnPressStartMs = now;            // borda de descida: começou a apertar
+      } else {
+        // Borda de subida: soltou → decide curta vs longa pela duração.
+        unsigned long held = now - btnPressStartMs;
+        if (held >= CAL_BUTTON_LONGPRESS_MS) {
+          runCalibrationAndCheck(true);   // longa → recalibra a bússola
+        } else {
+          displayShowSelfTest();
+          bool ok = runSensorSelfTest();  // curta → só verifica
+          displayShowCalResult(ok, false);
+        }
+      }
+    }
+  }
+
   // ── Link com o RPi (processa comandos recebidos, não-bloqueante) ──
   processSerialLink();
 
@@ -99,6 +161,13 @@ void loop() {
   if (now - statusLogPrevMs >= STATUS_LOG_INTERVAL_MS || statusLogPrevMs == 0) {
     statusLogPrevMs = now;
     printStatusBlock();
+  }
+
+  // ── HUD no OLED (cadência própria, mais rápida que o log serial) ──
+  static unsigned long displayPrevMs = 0;
+  if (now - displayPrevMs >= OLED_UPDATE_MS || displayPrevMs == 0) {
+    displayPrevMs = now;
+    updateDisplayHUD();
   }
 
   delay(10);

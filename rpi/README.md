@@ -1,5 +1,13 @@
 # RPi4 — Lado Raspberry Pi da migração USV-AM (F1 + F2 + F3)
 
+![role](https://img.shields.io/badge/papel-elo%20de%20nuvem%20(UART%20%E2%86%94%20RTDB)-blue)
+![stack](https://img.shields.io/badge/stack-Python%20%2B%20pyserial%20%2B%20firebase--admin-3776ab)
+![test](https://img.shields.io/badge/teste-mock--first%20(sem%20hardware)-brightgreen)
+
+> Elo de nuvem do **USV-AM**: recebe telemetria do ESP32 por UART e a publica no Firebase
+> RTDB, e repassa comandos do dashboard ao ESP32. Visão geral do sistema no
+> [README principal](../README.md). Setup do RPi headless em [`SETUP_RASPBERRY.md`](./SETUP_RASPBERRY.md).
+
 Transporte serial JSON-lines entre o **Raspberry Pi 4** e o **ESP32** (F1), a
 camada Firebase RTDB que o RPi assume do ESP32 (F2), e a resiliência de bordo
 — watchdog, presença, log rotativo e systemd (F3). Tudo testável **sem hardware**

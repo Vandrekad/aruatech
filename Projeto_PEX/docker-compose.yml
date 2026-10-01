@@ -1,0 +1,49 @@
+version: "3.7"
+
+# AruaTech USV-AM Dashboard — Production Swarm stack for Portainer.
+#
+# Frontend-only stack: the "backend" is Firebase Realtime Database + Auth (a
+# managed cloud service the SPA talks to directly), so this stack ships only the
+# Nginx-served SPA. There is NO backend/postgres/redis service here.
+#
+# Aligned with the RealtimeTranslator / n8n stack conventions on this host:
+#   * Traefik is EXTERNAL (runs on the VandreNet swarm already) — this stack
+#     ships NO traefik service, only routing labels. certresolver is
+#     `letsencryptresolver` (the resolver name configured on that Traefik).
+#   * Single external overlay network VandreNet.
+#
+# The image is pulled from GHCR (published by GitHub Actions). Override with
+# ${IMAGE_BASE} / ${IMAGE_TAG} in the stack env. See .env.example for all vars.
+# The Firebase VITE_* config is baked at BUILD time by Actions, not here.
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Frontend — Nginx serving the pre-built Vite SPA (pulled from GHCR).
+  # ────────────────────────────────────────────────────────────────────────
+  frontend:
+    image: ${IMAGE_BASE:-ghcr.io/vandrekad/usv-frontend}:${IMAGE_TAG:-latest}
+    networks:
+      - VandreNet
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=VandreNet
+        - traefik.http.routers.usv-frontend.rule=Host(`${FRONTEND_DOMAIN:-usv.automakad.com.br}`)
+        - traefik.http.routers.usv-frontend.entrypoints=websecure
+        - traefik.http.routers.usv-frontend.tls.certresolver=letsencryptresolver
+        - traefik.http.services.usv-frontend.loadbalancer.server.port=80
+
+networks:
+  VandreNet:
+    external: true
+    name: VandreNet

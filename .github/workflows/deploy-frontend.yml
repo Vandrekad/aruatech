@@ -1,0 +1,80 @@
+name: Build, Push and Deploy Frontend to Portainer
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "Projeto_PEX/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  # Fixed image name so the compose default (ghcr.io/vandrekad/usv-frontend)
+  # matches regardless of the repo's own name/casing.
+  IMAGE_NAME: vandrekad/usv-frontend
+  FRONTEND_CONTEXT: ./Projeto_PEX
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.FRONTEND_CONTEXT }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Firebase VITE_* are inlined by Vite at build time, so they MUST be
+          # injected here (as repo SECRETS) — otherwise the published bundle
+          # runs in mock mode (the app falls back to mock when keys are missing).
+          build-args: |
+            VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+            VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+            VITE_FIREBASE_DATABASE_URL=${{ secrets.VITE_FIREBASE_DATABASE_URL }}
+            VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+            VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+            VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+            VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Trigger a Portainer stack redeploy (pull latest image) after the push.
+  # Set the PORTAINER_WEBHOOK_URL repo secret to the stack's webhook URL.
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Trigger Portainer redeploy webhook
+        run: |
+          if [ -z "${{ secrets.PORTAINER_WEBHOOK_URL }}" ]; then
+            echo "PORTAINER_WEBHOOK_URL not set — skipping redeploy trigger."
+            exit 0
+          fi
+          curl -fsS -X POST "${{ secrets.PORTAINER_WEBHOOK_URL }}"
+          echo "Portainer redeploy webhook triggered."

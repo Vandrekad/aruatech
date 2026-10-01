@@ -19,7 +19,9 @@ extern double currentLat;
 extern double currentLon;
 extern double currentHeading;
 extern int batteryMv;
-extern int obsDist;
+extern int obsDist;    // menor das duas distâncias de proa (compat: obstáculo mais próximo)
+extern int obsDistL;   // distância do sensor de proa ESQUERDO (bombordo), cm
+extern int obsDistR;   // distância do sensor de proa DIREITO (estibordo), cm
 extern int thrustL;
 extern int thrustR;
 extern String activeMissionId;
@@ -38,7 +40,9 @@ extern bool compassReady;
 extern unsigned long gpsBytesWindow;    // bytes brutos recebidos na última janela
 extern unsigned long gpsNmeaWindow;     // bytes ASCII-NMEA na última janela
 extern bool compassLastReadOk;          // última leitura da bússola teve sucesso
-extern bool ultrasonicHealthy;          // último eco do HC-SR04 foi válido
+extern bool ultrasonicHealthy;          // último eco de proa foi válido (qualquer sensor)
+extern bool ultrasonicLHealthy;         // último eco do sensor ESQUERDO foi válido
+extern bool ultrasonicRHealthy;         // último eco do sensor DIREITO foi válido
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Missão e rota

@@ -12,6 +12,8 @@ double currentLon = -60.0250;
 double currentHeading = 0.0;
 int batteryMv = 8000;
 int obsDist = 200;
+int obsDistL = 200;
+int obsDistR = 200;
 int thrustL = 0;
 int thrustR = 0;
 String activeMissionId = "";
@@ -29,6 +31,8 @@ unsigned long gpsBytesWindow = 0;
 unsigned long gpsNmeaWindow = 0;
 bool compassLastReadOk = false;
 bool ultrasonicHealthy = false;
+bool ultrasonicLHealthy = false;
+bool ultrasonicRHealthy = false;
 
 // Missão e rota
 double goalLat = -3.1019;

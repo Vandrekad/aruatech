@@ -4,16 +4,51 @@
 #include "modules/utils/utils.h"
 #include "modules/state/state.h"
 
+// Flag de saúde do filesystem. Só vira true se o LittleFS montar de fato. Todas
+// as funções de escrita/leitura consultam este flag antes de tocar no LittleFS,
+// para nunca cair no lfs_alloc com block_count inválido (que gera panic
+// IntegerDivideByZero e boot loop quando o FS está corrompido).
+static bool fsReady = false;
+
+bool isFileSystemReady() {
+  return fsReady;
+}
+
 bool initFileSystem() {
-  if (!LittleFS.begin(true)) {
-    Serial.println("Falha ao iniciar LittleFS.");
-    return false;
+  // 1ª tentativa: montar formatando no erro (comportamento padrão). Em FS
+  // corrompido, porém, o begin(true) pode montar um superbloco inválido em vez
+  // de reformatar — por isso a checagem de sanidade + reformatação explícita
+  // abaixo.
+  if (LittleFS.begin(true)) {
+    // Sanidade: um FS válido reporta totalBytes > 0. Se vier 0, o superbloco
+    // está inconsistente (block_count zerado) — força format + remonta.
+    if (LittleFS.totalBytes() > 0) {
+      Serial.printf("LittleFS montado (%u bytes).\n", (unsigned)LittleFS.totalBytes());
+      fsReady = true;
+      return true;
+    }
+    Serial.println("LittleFS montou com totalBytes=0 (superbloco invalido) — reformatando...");
+    LittleFS.end();
+  } else {
+    Serial.println("Falha ao montar LittleFS — tentando reformatar...");
   }
-  Serial.println("LittleFS montado.");
-  return true;
+
+  // Reformatação explícita e remontagem.
+  if (LittleFS.format() && LittleFS.begin(false) && LittleFS.totalBytes() > 0) {
+    Serial.printf("LittleFS reformatado e montado (%u bytes).\n", (unsigned)LittleFS.totalBytes());
+    fsReady = true;
+    return true;
+  }
+
+  Serial.println("ERRO: LittleFS indisponivel — buffering local DESLIGADO (navegacao segue normal).");
+  fsReady = false;
+  return false;
 }
 
 bool appendLineToFile(const char *path, const String &line) {
+  if (!fsReady) {
+    return false;  // FS indisponível — no-op seguro (evita panic no lfs_alloc).
+  }
   File file = LittleFS.open(path, FILE_APPEND);
   if (!file) {
     Serial.printf("Erro abrindo %s para append.\n", path);
@@ -25,6 +60,9 @@ bool appendLineToFile(const char *path, const String &line) {
 }
 
 bool readFileLines(const char *path, std::vector<String> &lines) {
+  if (!fsReady) {
+    return false;
+  }
   File file = LittleFS.open(path, FILE_READ);
   if (!file) {
     return false;
@@ -41,6 +79,9 @@ bool readFileLines(const char *path, std::vector<String> &lines) {
 }
 
 bool writeFileLines(const char *path, const std::vector<String> &lines) {
+  if (!fsReady) {
+    return false;
+  }
   File file = LittleFS.open(path, FILE_WRITE);
   if (!file) {
     Serial.printf("Erro abrindo %s para escrita.\n", path);

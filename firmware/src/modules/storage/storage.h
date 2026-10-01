@@ -9,6 +9,13 @@
 // ao reconectar, drena o buffer via UART e o publica no Firebase.
 
 bool initFileSystem();
+
+// Retorna true somente se o LittleFS montou com sucesso no boot. Enquanto for
+// false, TODAS as funções de escrita/leitura abaixo são no-ops seguras (não
+// tocam no LittleFS). Isso evita o boot loop por IntegerDivideByZero dentro do
+// lfs_alloc quando o filesystem está corrompido (block_count inválido).
+bool isFileSystemReady();
+
 bool appendLineToFile(const char *path, const String &line);
 bool readFileLines(const char *path, std::vector<String> &lines);
 bool writeFileLines(const char *path, const std::vector<String> &lines);

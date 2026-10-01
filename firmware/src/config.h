@@ -58,20 +58,73 @@
 // local; a navegação continua normalmente (autonomia independe do RPi).
 #define RPI_LINK_TIMEOUT_MS  30000
 
-// I2C (Bússola HMC5883L)
+// I2C (Bússola magnetômetro)
 #define I2C_SDA_PIN       21
 #define I2C_SCL_PIN       22
-#define HMC5883L_ADDRESS  0x1E
+// O módulo detectado pelo I2C-SCAN responde em 0x2C — é um QMC5883L (clone),
+// NÃO um HMC5883L (que seria 0x1E). Registradores e sequência de init são
+// diferentes do HMC. Mantido o endereço 0x1E como referência histórica.
+#define HMC5883L_ADDRESS  0x1E            // HMC5883L genuíno
+#define QMC5883L_ADDRESS  0x2C            // módulo real presente no barramento
+#define QMC5883L_ADDRESS_STD 0x0D         // QMC5883L genuíno (endereço padrão)
+// Mapa de registradores do QMC5883L:
+#define QMC5883L_REG_DATA     0x00        // X_LSB,X_MSB,Y_LSB,Y_MSB,Z_LSB,Z_MSB
+#define QMC5883L_REG_STATUS   0x06        // bit0 = DRDY (dado pronto)
+#define QMC5883L_REG_CONFIG1  0x09        // OSR/RNG/ODR/MODE
+#define QMC5883L_REG_CONFIG2  0x0A        // soft reset / rol_pnt
+#define QMC5883L_REG_SETRESET 0x0B        // período set/reset (recomendado 0x01)
+// CONFIG1: OSR=512(0b00<<6) | RNG=8G(0b01<<4) | ODR=200Hz(0b11<<2) | MODE=cont(0b01)
+#define QMC5883L_CONFIG1_VAL  0x1D
+// Declinação magnética de MANAUS/AM (lat -3.11, lon -59.93), modelo WMM 2025:
+// ~ +6.8° LESTE. Rumo verdadeiro = rumo magnético + declinação (Leste é positivo).
+// Converte o norte magnético (que a bússola mede) para o norte GEOGRÁFICO, que é
+// o referencial do curso do GPS e das rotas LOS. Atualize se mudar de região.
+#define MAG_DECLINATION_DEG   6.8f
+// Diagnóstico: com 1, varre o barramento I2C no boot e lista os endereços que
+// respondem. Voltar a 0 em produção.
+#define I2C_SCAN          1
 
-// Ultrassônico HC-SR04 — pinos imunes ao WiFi:
-//   Trig = GPIO5 (I/O livre, boot-safe) — saída de disparo.
-//   Echo = GPIO35 (ADC1, input-only) — entrada; USAR DIVISOR 5V→3.3V.
-#define ULTRASONIC_TRIG_PIN  5
-#define ULTRASONIC_ECHO_PIN  35
+// OLED SSD1306 (mesmo barramento I2C, endereço 0x3C — visto no I2C-SCAN).
+#define OLED_ADDRESS      0x3C
+#define OLED_WIDTH        128
+// ALTURA do painel — TROQUE conforme o seu módulo físico:
+//   64 → OLED 0.96" (128x64).   32 → OLED 0.91" (128x32).
+// Se o HUD aparece cortado/espremido, quase sempre é este valor errado: o
+// layout se adapta (6 linhas em 64, 4 compactas em 32).
+#define OLED_HEIGHT       64
+#define OLED_UPDATE_MS    500     // atualiza o HUD a cada 500ms
 
-// Motores (PWM)
-#define MOTOR_LEFT_PIN       32
-#define MOTOR_RIGHT_PIN      33
+// Ultrassônicos AJ-SR04M de proa — DOIS sensores (esquerdo/direito) para
+// desvio DIRECIONAL. Alimentados a 3.3V → Echo em 3.3V, SEM divisor de tensão.
+//   Sensor ESQUERDO (bombordo): Trig=GPIO5, Echo=GPIO35 (o sensor que já existia).
+//     GPIO35 é input-only (ADC1) — ok, o Echo só é lido.
+//   Sensor DIREITO (estibordo): Trig=GPIO19, Echo=GPIO23 — I/O plenos, boot-safe.
+//     NÃO usar 16/17 aqui: esses pinos ainda são do Serial2 (link RPi, ver
+//     RPI_LINK_RX/TX_PIN). A migração do link para USB foi decidida no diagrama
+//     mas ainda NÃO foi aplicada no firmware, então 16/17 continuam ocupados —
+//     colocar o sensor lá causava conflito de barramento.
+// Compat: ULTRASONIC_TRIG_PIN/ECHO_PIN continuam apontando o sensor esquerdo,
+// para não quebrar referências antigas.
+#define ULTRASONIC_L_TRIG_PIN  5
+#define ULTRASONIC_L_ECHO_PIN  35
+#define ULTRASONIC_R_TRIG_PIN  19
+#define ULTRASONIC_R_ECHO_PIN  23
+// Aliases legados (sensor esquerdo = o sensor único original).
+#define ULTRASONIC_TRIG_PIN  ULTRASONIC_L_TRIG_PIN
+#define ULTRASONIC_ECHO_PIN  ULTRASONIC_L_ECHO_PIN
+
+// Motores (L298N — ponte H dupla, motores DC 3-6V bidirecionais)
+//   ENA/ENB = velocidade (PWM); IN1..IN4 = sentido de rotação de cada motor.
+//   Pino ENA/ENB (PWM):
+#define MOTOR_LEFT_PIN       32   // ENA — PWM velocidade motor esquerdo
+#define MOTOR_RIGHT_PIN      33   // ENB — PWM velocidade motor direito
+//   Pinos de sentido (digitais). Combinação por motor: (HIGH,LOW)=frente,
+//   (LOW,HIGH)=ré, (LOW,LOW)=coast/freio. GPIO14 é strapping (MTMS) mas seguro
+//   como SAÍDA após o boot; troque por GPIO19/23 se quiser zero strapping.
+#define MOTOR_LEFT_IN1_PIN   25   // IN1 — sentido motor esquerdo (A)
+#define MOTOR_LEFT_IN2_PIN   26   // IN2 — sentido motor esquerdo (B)
+#define MOTOR_RIGHT_IN3_PIN  27   // IN3 — sentido motor direito (A)
+#define MOTOR_RIGHT_IN4_PIN  14   // IN4 — sentido motor direito (B)
 #define MOTOR_LEFT_CHANNEL   0
 #define MOTOR_RIGHT_CHANNEL  1
 #define MOTOR_PWM_FREQ       5000
@@ -84,6 +137,20 @@
 #define STATUS_LOG_INTERVAL_MS  3000
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BOTÃO FÍSICO DE CALIBRAÇÃO / SELF-TEST
+// ─────────────────────────────────────────────────────────────────────────────
+// Botão momentâneo entre o GPIO e o GND (sem resistor externo — usa o pull-up
+// interno). GPIO18: I/O pleno, boot-safe, livre (não colide com GPS 4/13, RPi
+// 16/17, I2C 21/22, ultrassom 5/35/19/23 nem motores 32/33/25/26/27/14).
+// Pressionar aterra o pino -> leitura LOW = acionado. Segurar não redispara: é
+// preciso soltar e apertar de novo (detecção por borda + debounce).
+#define CAL_BUTTON_PIN         18
+#define CAL_BUTTON_DEBOUNCE_MS 50
+// Pressão LONGA (>= este tempo) força recalibração completa da bússola; pressão
+// CURTA roda só a verificação (self-test) dos sensores, sem girar o barco.
+#define CAL_BUTTON_LONGPRESS_MS 1500
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PARÂMETROS DE NAVEGAÇÃO (LOS)
 // ─────────────────────────────────────────────────────────────────────────────
 #define LOS_LOOKAHEAD_METERS       8.0
@@ -93,6 +160,17 @@
 #define OBSTACLE_THRESHOLD_CM      60
 #define OBSTACLE_CLEAR_CM          120
 #define OBSTACLE_AVOIDANCE_TIMEOUT_MS 8000
+// ── Desvio DIRECIONAL (dois sensores de proa) ──
+// O motor EXTERNO (lado com mais espaço livre) segue avante em AVOID_OUTER_THRUST.
+// O motor INTERNO entra em RÉ com magnitude proporcional a quão perto está o
+// obstáculo mais próximo: perto → ré forte (pivô fechado), longe → ré suave.
+#define AVOID_OUTER_THRUST         180   // empuxo do motor externo (avante)
+#define AVOID_REVERSE_MIN          40    // magnitude mínima de ré do motor interno
+#define AVOID_REVERSE_MAX          120   // magnitude máxima de ré (obstáculo colado)
+// Banda morta de diferença entre os dois sensores: |L-R| abaixo disso é tratado
+// como "obstáculo centrado" — sem lado preferencial, usa o desvio-padrão (vira
+// para bombordo). Evita pivô trêmulo por ruído do AJ-SR04M.
+#define AVOID_DIFF_DEADBAND_CM     8
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATION-KEEPING (IDLE_HOLDING_POSITION) — manter posição contra correnteza

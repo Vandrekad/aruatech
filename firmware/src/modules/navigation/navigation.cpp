@@ -137,8 +137,12 @@ void updateLOSControl() {
     double error = headingErrorDeg(desiredHeading, currentHeading);
     int correction = (int)(error * LOS_HEADING_GAIN);
 
-    thrustL = constrain(NAV_BASE_THRUST + correction, 0, 255);
-    thrustR = constrain(NAV_BASE_THRUST - correction, 0, 255);
+    // Propulsão diferencial. O piso agora vai a -255 (não mais 0): em curva
+    // fechada o motor interno pode entrar em RÉ (habilitado pelos pinos IN do
+    // L298N), dando raio de giro menor. Em navegação reta ambos ficam em
+    // NAV_BASE_THRUST (avante), então o caso comum não muda.
+    thrustL = constrain(NAV_BASE_THRUST + correction, -255, 255);
+    thrustR = constrain(NAV_BASE_THRUST - correction, -255, 255);
 
     // Banda morta: se erro angular é mínimo, navegação reta
     if (fabs(error) < 5.0) {
@@ -147,9 +151,41 @@ void updateLOSControl() {
     }
 
   } else if (currentState == OBSTACLE_AVOIDANCE) {
-    // Desvio simples: virar para um lado
-    thrustL = 180;
-    thrustR = 60;
+    // Desvio DIRECIONAL a partir dos dois sensores de proa (obsDistL/obsDistR).
+    // Regra: virar para o lado com MAIS espaço livre. O motor EXTERNO (lado
+    // livre) segue avante; o motor INTERNO (lado do obstáculo) entra em RÉ,
+    // criando um pivô. A magnitude da ré cresce quanto mais PERTO estiver o
+    // obstáculo mais próximo (min das duas leituras) — perto = pivô fechado.
+    //
+    // diff > 0  → esquerda mais livre que direita (obstáculo à direita) → vira à
+    //             ESQUERDA: motor esquerdo (interno) em ré, direito avante.
+    // diff < 0  → direita mais livre (obstáculo à esquerda) → vira à DIREITA:
+    //             motor direito (interno) em ré, esquerdo avante.
+    // |diff| dentro da banda morta → obstáculo centrado, sem lado preferencial:
+    //             mantém o desvio-padrão (vira a bombordo, como o 180/-60 antigo).
+    int diff = obsDistL - obsDistR;
+
+    // Intensidade da ré proporcional à proximidade do obstáculo mais próximo.
+    // obsDist=OBSTACLE_THRESHOLD_CM → ré mínima; obsDist=0 → ré máxima.
+    int nearest = constrain(obsDist, 0, OBSTACLE_THRESHOLD_CM);
+    int reverseMag = map(nearest, 0, OBSTACLE_THRESHOLD_CM,
+                         AVOID_REVERSE_MAX, AVOID_REVERSE_MIN);
+    reverseMag = constrain(reverseMag, AVOID_REVERSE_MIN, AVOID_REVERSE_MAX);
+
+    if (diff > AVOID_DIFF_DEADBAND_CM) {
+      // Obstáculo à DIREITA → vira à esquerda: esquerdo interno (ré), direito externo.
+      thrustL = -reverseMag;
+      thrustR = AVOID_OUTER_THRUST;
+    } else if (diff < -AVOID_DIFF_DEADBAND_CM) {
+      // Obstáculo à ESQUERDA → vira à direita: direito interno (ré), esquerdo externo.
+      thrustL = AVOID_OUTER_THRUST;
+      thrustR = -reverseMag;
+    } else {
+      // Centrado / diferença dentro do ruído → desvio-padrão a bombordo
+      // (equivale ao comportamento fixo anterior: externo esquerdo, interno direito).
+      thrustL = AVOID_OUTER_THRUST;
+      thrustR = -reverseMag;
+    }
 
     unsigned long elapsed = millis() - obstacleAvoidanceStartMs;
     if ((obsDist > OBSTACLE_CLEAR_CM && elapsed > 2000) ||

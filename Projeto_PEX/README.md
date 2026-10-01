@@ -1,8 +1,8 @@
 # Projeto_PEX — Frontend (React + Vite)
 
-Uma aplicação frontend em React (Vite) usada como painel para o projeto USVs / Drone Fluvial Autônomo. A interface consome dados via Firebase Realtime Database e fornece visualização de telemetria em mapa usando Leaflet.
+Uma aplicação frontend em React (Vite) usada como painel para o projeto USVs / Drone Fluvial Autônomo. A interface consome dados via Firebase Realtime Database e fornece visualização de telemetria em um mapa 3D usando Cesium.
 
-**Tecnologias principais:** React, Vite, Firebase, Leaflet, ESLint.
+**Tecnologias principais:** React, Vite, Firebase, Cesium, ESLint.
 
 **Objetivo deste README:** descrever como preparar o ambiente, executar em modo de desenvolvimento, gerar build de produção e onde configurar o Firebase.
 
@@ -81,7 +81,7 @@ npm run lint
 5. Opcional: crie um usuário operador para testes (sugestão `operador@usv-am.local`).
 
 **Notas e dicas**
-- A aplicação usa Leaflet para mapas; se as camadas não aparecerem verifique a configuração de CSS do Leaflet em `index.css`/`App.css`.
+- A aplicação usa **Cesium** (globo 3D) para o mapa. O botão *Seguir veículo* no canto do mapa aproxima e acompanha o drone durante a navegação; desligado, mantém a visão ampla. O CSS do Cesium é importado em `src/components/MapPanel.jsx`.
 - Para desenvolvimento off-line ou demonstração sem Firebase, use o hook `useMockDrone.js`.
 
 **Contribuição**

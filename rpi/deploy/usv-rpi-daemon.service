@@ -13,9 +13,9 @@ WorkingDirectory=/home/vandrekad/aruatech/rpi
 # Ajuste os caminhos/URL conforme o seu setup (F0 item 0.4 gera o serviceAccount.json)
 ExecStart=/home/vandrekad/aruatech/rpi/.venv/bin/python \
     /home/vandrekad/aruatech/rpi/rpi_daemon.py \
-    --port /dev/serial0 \
+    --port /dev/ttyUSB0 \
     --service-account /home/vandrekad/serviceAccount.json \
-    --database-url https://aruatech-default-rtdb.firebaseio.com/ \
+    --database-url https://usvs-drone-fluvial-autonomo-default-rtdb.firebaseio.com/ \
     --drone-id drone_01
 
 # Resiliencia: reinicia sempre que cair, com backoff. StartLimit evita loop de crash
