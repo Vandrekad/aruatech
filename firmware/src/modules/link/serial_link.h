@@ -25,7 +25,7 @@
 
 #include <Arduino.h>
 
-// Inicializa a UART do link (Serial2 nos pinos definidos em config.h).
+// Inicializa o link com o RPi na Serial USB nativa (UART0 = `Serial`).
 void initSerialLink();
 
 // Lê e processa mensagens pendentes do RPi (não-bloqueante). Deve ser chamada

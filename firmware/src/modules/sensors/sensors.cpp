@@ -308,20 +308,57 @@ void updateMotorOutputs() {
 }
 
 // Dispara UM sensor ultrassônico e retorna a distância em cm, ou -1 em timeout
-// (sem eco válido). pulseIn é bloqueante — timeout de 25ms limita o impacto.
-static int pingUltrasonic(int trigPin, int echoPin) {
+// (sem eco válido). pulseIn é bloqueante — timeout limita o impacto.
+//
+// AJ-SR04M (boas práticas de aplicação):
+//  - Trigger: pulso de 10us, precedido de LOW firme (settle) — padrão do módulo.
+//  - Conversão: distancia_cm = tempo_us * SOUND_CM_PER_US / 2. O /2 é ida+volta.
+//    SOUND_CM_PER_US = 0.0343 cm/us (343 m/s a ~20C) — constante explícita, não
+//    o "0.034" arredondado, para não acumular viés sistemático.
+//  - Faixa útil: ecos abaixo da zona morta (~20cm) ou acima do alcance são
+//    descartados (retorno fora de [MIN,MAX] vira amostra inválida).
+//  - Robustez a ruído/eco espúrio: coleta N amostras rápidas e usa a MEDIANA
+//    (não a média) — um eco falso isolado não contamina a mediana. Isto é a
+//    prática recomendada para HC-SR04/AJ-SR04M em ambiente ruidoso.
+static int pingOnce(int trigPin, int echoPin) {
   digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
+  delayMicroseconds(4);
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
   unsigned long duration = pulseIn(echoPin, HIGH, ULTRASONIC_TIMEOUT_US);
-  if (duration > 0) {
-    int measured = (int)(duration * 0.034 / 2.0);
-    return min(ULTRASONIC_MAX_CM, measured);
+  if (duration == 0) {
+    return -1;  // timeout: sem eco
   }
-  return -1;  // timeout: sem eco válido
+  // 0.0343 cm/us (343 m/s). Divisão por 2 = ida e volta.
+  int cm = (int)((duration * SOUND_CM_PER_US) / 2.0f + 0.5f);
+  return cm;
+}
+
+static int pingUltrasonic(int trigPin, int echoPin) {
+  // Coleta ULTRASONIC_SAMPLES amostras e retorna a MEDIANA das válidas.
+  int samples[ULTRASONIC_SAMPLES];
+  int n = 0;
+  for (int i = 0; i < ULTRASONIC_SAMPLES; i++) {
+    int cm = pingOnce(trigPin, echoPin);
+    // Mantém só ecos plausíveis: dentro de [MIN_CM, MAX_CM]. Fora disso é zona
+    // morta (eco cedo demais) ou fora de alcance (eco tarde/ausente) — ruído.
+    if (cm >= ULTRASONIC_MIN_CM && cm <= ULTRASONIC_MAX_CM) {
+      samples[n++] = cm;
+    }
+    delayMicroseconds(ULTRASONIC_INTER_PING_US);  // deixa o eco anterior decair
+  }
+  if (n == 0) {
+    return -1;  // nenhuma amostra válida
+  }
+  // Mediana por insertion sort (n pequeno).
+  for (int i = 1; i < n; i++) {
+    int key = samples[i], j = i - 1;
+    while (j >= 0 && samples[j] > key) { samples[j + 1] = samples[j]; j--; }
+    samples[j + 1] = key;
+  }
+  return samples[n / 2];
 }
 
 void readUltrasonic() {

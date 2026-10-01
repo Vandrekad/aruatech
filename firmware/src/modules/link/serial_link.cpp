@@ -1,13 +1,17 @@
 #include "modules/link/serial_link.h"
 #include <ArduinoJson.h>
 #include "config.h"
+#include "modules/log/log.h"
 #include "modules/state/state.h"
 #include "modules/navigation/navigation.h"
 #include "modules/commands/commands.h"
 
-// Serial2 do ESP32 é dedicada ao link com o RPi (GPS foi movido para os pinos
-// GPS_RX_PIN/GPS_TX_PIN e usa Serial1 — ver sensors.cpp).
-static HardwareSerial &RpiSerial = Serial2;
+// O link com o RPi usa a Serial USB NATIVA (UART0 = `Serial`): um único cabo USB
+// liga o ESP32 ao RPi, alimentando-o (5V do RPi) e trafegando os dados. No RPi
+// esse ESP32 aparece como /dev/ttyUSB1. Os GPIO16/17 (antigo Serial2) ficam
+// livres. Em produção os logs de debug ficam silenciados (ver log.h) para não
+// sujar o stream JSON — só a telemetria/acks saem nesta porta.
+static HardwareSerial &RpiSerial = Serial;
 
 // Buffer de linha com limite fixo (evita crescimento sem limite / memory leak).
 #define RPI_LINE_MAX 256
@@ -18,11 +22,14 @@ static unsigned long lastRpiMessageMs = 0;
 static bool rpiEverSeen = false;
 
 void initSerialLink() {
-  RpiSerial.begin(RPI_LINK_BAUD, SERIAL_8N1, RPI_LINK_RX_PIN, RPI_LINK_TX_PIN);
+  // UART0/USB já foi iniciado em setup() (Serial.begin). Não re-inicializamos a
+  // porta aqui para não derrubar o console; apenas garantimos o baud do link.
+  // (Se algum dia o link mudar de porta, trocar RpiSerial e o begin aqui.)
+  RpiSerial.begin(RPI_LINK_BAUD);
   linePos = 0;
   lastRpiMessageMs = 0;
   rpiEverSeen = false;
-  Serial.println("[LINK] Serial link com RPi inicializado (Serial2 @115200).");
+  DBG_PRINTLN("[LINK] Link com RPi inicializado (USB/UART0 @115200).");
 }
 
 bool isRpiPresent() {
@@ -78,7 +85,7 @@ static void handleRpiLine(const char *line) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, line);
   if (err) {
-    Serial.printf("[LINK] JSON inválido do RPi: %s\n", err.c_str());
+    DBG_PRINTF("[LINK] JSON invalido do RPi: %s\n", err.c_str());
     return;
   }
 
@@ -106,7 +113,7 @@ static void handleRpiLine(const char *line) {
   command.issuedAt = doc["issued_at"] | 0UL;
 
   if (command.commandId.length() == 0) {
-    Serial.println("[LINK] Comando sem command_id — ignorado.");
+    DBG_PRINTLN("[LINK] Comando sem command_id — ignorado.");
     sendAck("", false);
     return;
   }
@@ -121,7 +128,7 @@ static void handleRpiLine(const char *line) {
     handleCommand(command);  // handleCommand já atualiza lastCommandId
     sendAck(command.commandId, true);
   } else {
-    Serial.printf("[LINK] Comando desconhecido do RPi: %s\n", cmd);
+    DBG_PRINTF("[LINK] Comando desconhecido do RPi: %s\n", cmd);
     sendAck(command.commandId, false);
   }
 }
@@ -143,7 +150,7 @@ void processSerialLink() {
         lineBuffer[linePos++] = c;
       } else {
         // Linha longa demais / corrompida — descarta e ressincroniza.
-        Serial.println("[LINK] Linha excedeu o buffer — descartada.");
+        DBG_PRINTLN("[LINK] Linha excedeu o buffer — descartada.");
         linePos = 0;
       }
     }

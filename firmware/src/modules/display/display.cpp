@@ -73,14 +73,19 @@ void updateDisplayHUD() {
   display.setTextSize(1);
   int y = 18;
 
-  // Rumo + fonte (C=bússola, G=curso GPS).
-  display.setCursor(0, y); y += 9;
+  // Rumo + fonte (C=bússola, G=curso GPS). Status do RPi no canto direito.
+  display.setCursor(0, y);
   if (hasGpsFix || compassLastReadOk) {
     display.printf("Rumo %3.0f%c%c", currentHeading, (char)247,   // 247 = '°'
                    compassLastReadOk ? 'C' : 'G');
   } else {
     display.print("Rumo ---");
   }
+  // Status do link com o RPi (USB) — "RPi:OK" se recebeu mensagem dentro de
+  // RPI_LINK_TIMEOUT_MS; "RPi:--" = sem link (ESP32 autônomo + buffer local).
+  display.setCursor(92, y);
+  display.print(isRpiPresent() ? "RPi:OK" : "RPi:--");
+  y += 9;
 
   // Obstáculos L | R (setas indicam o lado).
   display.setCursor(0, y); y += 9;
@@ -95,16 +100,13 @@ void updateDisplayHUD() {
   display.setCursor(0, y); y += 9;
   display.printf("Thr %d/%d", thrustL, thrustR);
 
-  // Posição + link RPi na última linha.
+  // Posição na última linha (completa, sem colidir com o status do RPi).
   display.setCursor(0, y);
   if (hasGpsFix) {
     display.printf("%.4f,%.4f", currentLat, currentLon);
   } else {
     display.print("sem posicao");
   }
-  // Símbolo de link no canto direito: '*' conectado, 'x' ausente.
-  display.setCursor(120, y);
-  display.print(isRpiPresent() ? "*" : "x");
 
   display.display();
 }

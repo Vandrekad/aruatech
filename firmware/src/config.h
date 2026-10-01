@@ -46,13 +46,26 @@
 #define GPS_BAUD          9600
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LINK COM RASPBERRY PI 4 (UART — Serial2 nos GPIO 16/17)
+// LINK COM RASPBERRY PI 4 (USB nativo — UART0 / Serial)
 // ─────────────────────────────────────────────────────────────────────────────
-// ESP32 Serial2: RX = GPIO16 (recebe do TX do RPi), TX = GPIO17 (envia ao RX do RPi)
-// 3.3V direto, sem level shifter. Protocolo: JSON-lines a 115200 baud.
-#define RPI_LINK_RX_PIN   16
-#define RPI_LINK_TX_PIN   17
+// Arquitetura física acordada: o ESP32 liga ao RPi 4 por UM ÚNICO CABO USB, que
+// ao mesmo tempo (a) ALIMENTA o ESP32 (o RPi recebe 5V/5A e repassa o 5V do USB)
+// e (b) transporta os DADOS. No RPi esse ESP32 aparece como /dev/ttyUSB1.
+// Por isso o link usa a Serial USB NATIVA (UART0 = `Serial`), não mais o Serial2
+// de pinos. Os antigos GPIO16/17 ficam LIVRES.
+//
+// CONSEQUÊNCIA (importante): a UART0/USB é a MESMA porta por onde os logs de
+// debug saíam. Com o link de dados nela, os logs NÃO podem compartilhar o
+// barramento — senão viram "lixo" no stream JSON que o RPi parseia. Por isso:
+//   - Em PRODUÇÃO (DEBUG_USB_CONSOLE 0): os logs LOG_* ficam silenciados; só
+//     trafega o protocolo JSON-lines, limpo, para o RPi.
+//   - Na BANCADA (DEBUG_USB_CONSOLE 1): religa os logs no `Serial` para você
+//     depurar pelo `pio device monitor`. NÃO conecte o RPi nesse modo (os logs
+//     sujariam o parser dele). Volte a 0 antes de operar com o RPi.
 #define RPI_LINK_BAUD     115200
+// Quando 1, religa os logs de debug no console USB (uso de bancada). Em produção
+// (ESP32 ligado ao RPi) DEVE ser 0 para o link JSON ficar limpo.
+#define DEBUG_USB_CONSOLE  0
 // Timeout: se nenhuma mensagem do RPi chegar nesse período, o ESP32 assume que
 // está sozinho (modo autônomo) e passa a bufferizar a telemetria em LittleFS
 // local; a navegação continua normalmente (autonomia independe do RPi).
@@ -99,10 +112,8 @@
 //   Sensor ESQUERDO (bombordo): Trig=GPIO5, Echo=GPIO35 (o sensor que já existia).
 //     GPIO35 é input-only (ADC1) — ok, o Echo só é lido.
 //   Sensor DIREITO (estibordo): Trig=GPIO19, Echo=GPIO23 — I/O plenos, boot-safe.
-//     NÃO usar 16/17 aqui: esses pinos ainda são do Serial2 (link RPi, ver
-//     RPI_LINK_RX/TX_PIN). A migração do link para USB foi decidida no diagrama
-//     mas ainda NÃO foi aplicada no firmware, então 16/17 continuam ocupados —
-//     colocar o sensor lá causava conflito de barramento.
+//     (GPIO16/17 agora estão LIVRES — o link do RPi migrou para a USB nativa /
+//     UART0 — mas mantemos 19/23 aqui para não remexer na fiação já montada.)
 // Compat: ULTRASONIC_TRIG_PIN/ECHO_PIN continuam apontando o sensor esquerdo,
 // para não quebrar referências antigas.
 #define ULTRASONIC_L_TRIG_PIN  5
@@ -135,20 +146,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 #define TELEMETRY_INTERVAL_MS   2000
 #define STATUS_LOG_INTERVAL_MS  3000
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BOTÃO FÍSICO DE CALIBRAÇÃO / SELF-TEST
-// ─────────────────────────────────────────────────────────────────────────────
-// Botão momentâneo entre o GPIO e o GND (sem resistor externo — usa o pull-up
-// interno). GPIO18: I/O pleno, boot-safe, livre (não colide com GPS 4/13, RPi
-// 16/17, I2C 21/22, ultrassom 5/35/19/23 nem motores 32/33/25/26/27/14).
-// Pressionar aterra o pino -> leitura LOW = acionado. Segurar não redispara: é
-// preciso soltar e apertar de novo (detecção por borda + debounce).
-#define CAL_BUTTON_PIN         18
-#define CAL_BUTTON_DEBOUNCE_MS 50
-// Pressão LONGA (>= este tempo) força recalibração completa da bússola; pressão
-// CURTA roda só a verificação (self-test) dos sensores, sem girar o barco.
-#define CAL_BUTTON_LONGPRESS_MS 1500
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PARÂMETROS DE NAVEGAÇÃO (LOS)
@@ -196,4 +193,18 @@
 #define GPS_LINE_MAX_LENGTH    120   // Máximo de caracteres por sentença NMEA
 #define ULTRASONIC_MAX_CM      400
 #define ULTRASONIC_TIMEOUT_US  25000
+// ── Boas práticas de leitura do AJ-SR04M ──
+// Velocidade do som: 343 m/s @ ~20°C = 0.0343 cm/µs. Constante EXPLÍCITA (não o
+// "0.034" arredondado) para não introduzir viés sistemático de ~0.9%.
+#define SOUND_CM_PER_US        0.0343f
+// Zona morta do AJ-SR04M: ele não mede de forma confiável abaixo de ~20cm (o
+// transdutor único ainda está "tocando" quando o eco curto volta). Ecos que
+// convertem para menos que isso são descartados como inválidos, não reportados
+// como distância real. Ajuste se o seu módulo tiver zona morta diferente.
+#define ULTRASONIC_MIN_CM      20
+// Amostras por leitura: coletamos N e usamos a MEDIANA (robusta a eco espúrio).
+#define ULTRASONIC_SAMPLES     5
+// Espaçamento entre pings do MESMO sensor: deixa o eco anterior decair antes do
+// próximo disparo, evitando que um eco residual contamine a amostra seguinte.
+#define ULTRASONIC_INTER_PING_US  3000
 #define FLUSH_BATCH_SIZE       10    // Linhas por lote no flush offline
