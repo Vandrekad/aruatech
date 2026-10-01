@@ -15,6 +15,11 @@
  *   {"cmd":"request_telemetry"}
  *   {"cmd":"ping"}
  *
+ * Recuperação de missão após reset do ESP32:
+ *   ESP32 -> RPi: {"cmd":"request_mission"}  (enviado no boot)
+ *   RPi -> ESP32: {"cmd":"set_destination",...}  (último target conhecido, ou
+ *                 {"type":"mission_none"} se não houver missão ativa)
+ *
  * Mensagens ESP32 -> RPi:
  *   {"type":"telemetry","ts":..,"lat":..,"lon":..,"hdg":..,"obs":..,"bat":..,
  *    "thrust_l":..,"thrust_r":..,"state":"..","mission_id":"..","progress":..}
@@ -40,3 +45,8 @@ void sendTelemetryToRpi();
 
 // Envia um evento operacional ao RPi (ex.: "obstacle_detected").
 void sendEventToRpi(const char *event, double value);
+
+// Pede ao RPi o último target de missão conhecido (recuperação após reset do
+// ESP32). O RPi responde com um set_destination (reaplicado como comando normal)
+// ou mission_none. Chamado no boot, após o link subir.
+void requestMissionFromRpi();

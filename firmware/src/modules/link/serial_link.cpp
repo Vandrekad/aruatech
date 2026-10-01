@@ -56,8 +56,15 @@ void sendTelemetryToRpi() {
   JsonDocument doc;
   doc["type"] = "telemetry";
   doc["ts"] = (uint32_t)(millis() / 1000);
-  doc["lat"] = currentLat;
-  doc["lon"] = currentLon;
+  // Posição: só enviada quando já houve ao menos 1 fix real (hasEverHadFix).
+  // Antes disso NÃO mandamos lat/lon — evita publicar 0/0 ou qualquer ponto
+  // fabricado como se fosse posição. has_pos diz ao RPi se a posição é válida;
+  // fix diz se o GPS tem fix AGORA (pode ser false mantendo a última válida).
+  doc["has_pos"] = hasEverHadFix;
+  if (hasEverHadFix) {
+    doc["lat"] = currentLat;
+    doc["lon"] = currentLon;
+  }
   doc["fix"] = hasGpsFix;
   doc["hdg"] = currentHeading;
   doc["obs"] = obsDist;
@@ -80,6 +87,15 @@ void sendEventToRpi(const char *event, double value) {
   sendJsonLine(doc);
 }
 
+void requestMissionFromRpi() {
+  // Recuperação pós-reset: pede ao RPi o último target de missão. O RPi responde
+  // com um set_destination (reaplicado pelo caminho normal de comando) ou com
+  // mission_none. Não bloqueia — a resposta chega assíncrona em processSerialLink.
+  JsonDocument doc;
+  doc["cmd"] = "request_mission";
+  sendJsonLine(doc);
+}
+
 // Converte um comando JSON recebido do RPi numa DroneCommand e despacha.
 static void handleRpiLine(const char *line) {
   JsonDocument doc;
@@ -90,6 +106,13 @@ static void handleRpiLine(const char *line) {
   }
 
   const char *cmd = doc["cmd"] | "";
+
+  // Resposta a request_mission quando o RPi não tem missão ativa guardada.
+  const char *rtype = doc["type"] | "";
+  if (strcmp(rtype, "mission_none") == 0) {
+    DBG_PRINTLN("[LINK] RPi informou: sem missao ativa para recuperar.");
+    return;
+  }
 
   // Mensagens de keep-alive / consulta não são comandos de navegação.
   if (strcmp(cmd, "ping") == 0) {

@@ -52,6 +52,12 @@ void setup() {
   //    mesmo sem o RPi. Comandos (set_destination/emergency_stop) chegam só por aqui.
   initSerialLink();
 
+  // 3a. Recuperação de missão pós-reset: pede ao RPi o último target conhecido.
+  //     Se o ESP32 reiniciou no meio de uma missão (brownout, watchdog), o RPi
+  //     reenvia o set_destination e a navegação é retomada sem intervenção. A
+  //     resposta chega assíncrona em processSerialLink() (não bloqueia o boot).
+  requestMissionFromRpi();
+
   // 3b. Verificação e calibração dos sensores no BOOT. O self-test sempre roda; a
   //     calibração da bússola só roda se NAO houver calibração salva (senão o boot
   //     travaria 25s girando). Em bancada, use os comandos serial 'cal'/'test'.

@@ -7,8 +7,12 @@ const char* pathBufferPath = PATH_BUFFER_PATH;
 
 // Estado de navegação
 NavState currentState = IDLE_HOLDING_POSITION;
-double currentLat = -3.1019;
-double currentLon = -60.0250;
+// Posição corrente. NÃO há coordenada fabricada de boot: começa em 0/0 e só é
+// válida depois do 1º fix real (hasEverHadFix). Quem consome (telemetria, HUD,
+// navegação) deve checar hasGpsFix/hasEverHadFix antes de usar — nunca publicar
+// 0/0 nem um ponto fictício como se fosse posição real.
+double currentLat = 0.0;
+double currentLon = 0.0;
 double currentHeading = 0.0;
 int batteryMv = 8000;
 int obsDist = 200;
@@ -21,8 +25,9 @@ String lastCommandId = "";
 
 // Sensores
 bool hasGpsFix = false;
-double gpsLat = -3.1019;
-double gpsLon = -60.0250;
+bool hasEverHadFix = false;   // true após o 1º fix válido; distingue "nunca tive posição" de "tive e perdi"
+double gpsLat = 0.0;
+double gpsLon = 0.0;
 double gpsCourse = 0.0;
 bool compassReady = false;
 
@@ -34,11 +39,12 @@ bool ultrasonicHealthy = false;
 bool ultrasonicLHealthy = false;
 bool ultrasonicRHealthy = false;
 
-// Missão e rota
-double goalLat = -3.1019;
-double goalLon = -60.0250;
-double homeLat = -3.1019;
-double homeLon = -60.0250;
+// Missão e rota. SEM ponto fabricado: só são válidos quando há target ativo
+// (hasActiveTarget), definido por um set_destination real vindo do RPi.
+double goalLat = 0.0;
+double goalLon = 0.0;
+double homeLat = 0.0;
+double homeLon = 0.0;
 double routeDistanceMeters = 0.0;
 double remainingDistanceMeters = 0.0;
 int activeLeg = 0;

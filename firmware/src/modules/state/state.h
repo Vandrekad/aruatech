@@ -31,6 +31,7 @@ extern String lastCommandId;
 // Sensores
 // ─────────────────────────────────────────────────────────────────────────────
 extern bool hasGpsFix;
+extern bool hasEverHadFix;   // true após o 1º fix válido (distingue "nunca tive posição" de "tive e perdi")
 extern double gpsLat;
 extern double gpsLon;
 extern double gpsCourse;

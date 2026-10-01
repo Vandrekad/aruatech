@@ -653,6 +653,7 @@ void readGPS() {
                   gpsCourse = fields[8].toDouble();
                 }
                 hasGpsFix = true;
+                hasEverHadFix = true;   // marca que já tivemos ao menos 1 posição real
               }
             } else {
               hasGpsFix = false;

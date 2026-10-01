@@ -67,6 +67,7 @@ class RpiDaemon:
         self._rx_count = 0
         self._pending_cmds: list[dict] = []   # comandos recebidos com o link caído
         self._pending_lock = threading.Lock()
+        self._last_mission: dict | None = None  # último set_destination (recuperação pós-reset)
         self._reconnect_backoff = RECONNECT_BACKOFF_START_S
         self._silence_alerted = False
         self._hb_thread: threading.Thread | None = None
@@ -80,6 +81,10 @@ class RpiDaemon:
         self._last_esp32_msg = self._clock()
         self._silence_alerted = False
         self._rx_count += 1
+        # Recuperação de missão pós-reset: o ESP32 pede o último target no boot.
+        if msg.get("cmd") == "request_mission":
+            self._respond_mission_request()
+            return
         # 2) Log de visibilidade: a cada N mensagens, confirma que o fluxo está
         #    vivo (antes o daemon era cego — "parou de logar" era indistinguível
         #    de "parou de receber").
@@ -134,9 +139,14 @@ class RpiDaemon:
             lat = target.get("lat", command.get("lat"))
             lon = target.get("lon", command.get("lon"))
             self.bridge.set_destination(cid, mid, lat, lon)
+            # Guarda o último target para recuperação pós-reset do ESP32
+            # (responde a request_mission). Mantido só em memória: o RPi já é a
+            # fonte de verdade dos comandos e repopula do Firebase ao reiniciar.
+            self._last_mission = {"command_id": cid, "mission_id": mid, "lat": lat, "lon": lon}
             log.info("comando set_destination repassado (cid=%s)", cid)
         elif cmd == "emergency_stop":
             self.bridge.emergency_stop(cid, mid)
+            self._last_mission = None  # stop encerra a missão; nada a recuperar
             log.info("comando emergency_stop repassado (cid=%s)", cid)
         else:
             log.warning("comando desconhecido ignorado: %s", cmd)
@@ -195,6 +205,22 @@ class RpiDaemon:
             self._link_up = False
             log.error("falha ao abrir link serial: %s", exc)
             return False
+
+    def _respond_mission_request(self) -> None:
+        """Responde ao request_mission do ESP32 (recuperação pós-reset): reenvia
+        o último set_destination conhecido, ou mission_none se não houver."""
+        try:
+            if self._last_mission:
+                m = self._last_mission
+                self.bridge.set_destination(
+                    m["command_id"], m["mission_id"], m["lat"], m["lon"])
+                log.info("request_mission: reenviado ultimo target (cid=%s)", m["command_id"])
+            else:
+                # Sem missão guardada: informa o ESP32 explicitamente.
+                self.bridge.send_command({"type": "mission_none"})
+                log.info("request_mission: sem missao ativa — mission_none enviado")
+        except Exception as exc:
+            log.error("falha ao responder request_mission: %s", exc)
 
     def _watchdog_tick(self) -> None:
         """Um ciclo do watchdog: reabre link se caiu, publica presença,
@@ -326,6 +352,9 @@ class _FakeBridge:
     def emergency_stop(self, cid, mid) -> None:
         self.sent.append({"cmd": "emergency_stop", "command_id": cid, "mission_id": mid})
 
+    def send_command(self, command: dict) -> None:
+        self.sent.append(command)
+
     def feed(self, msg: dict) -> None:
         if self.on_message:
             self.on_message(msg)
@@ -385,6 +414,26 @@ def _selftest_f2(bridge, backend, daemon) -> None:
     bridge.feed({"type": "ack", "command_id": "cmd_1", "ok": True})
     bridge.feed({"type": "pong"})
     assert len(backend.get("/logs")) == n_logs_before, "ack/pong nao deveriam virar log"
+
+    # 6) recuperacao de missao pos-reset: ESP32 pede, RPi reenvia o ultimo target.
+    #    (o emergency_stop do passo 4 limpou a missao, entao reinjetamos uma antes)
+    backend.inject_command("drone_01", {
+        "command_id": "cmd_3", "cmd_type": "set_destination", "mission_id": "m_1",
+        "target": {"lat": -3.2000, "lon": -60.1000},
+    })
+    n_sent_before = len(bridge.sent)
+    bridge.feed({"cmd": "request_mission"})
+    assert len(bridge.sent) == n_sent_before + 1, "request_mission deveria reenviar algo"
+    assert bridge.sent[-1]["cmd"] == "set_destination", "deveria reenviar o ultimo set_destination"
+    assert bridge.sent[-1]["lat"] == -3.2000, "target recuperado errado"
+
+    # 7) apos emergency_stop, request_mission responde mission_none (missao encerrada)
+    backend.inject_command("drone_01", {
+        "command_id": "cmd_4", "cmd_type": "emergency_stop", "mission_id": "m_1",
+    })
+    n_sent_before = len(bridge.sent)
+    bridge.feed({"cmd": "request_mission"})
+    assert bridge.sent[-1] == {"type": "mission_none"}, "apos stop deveria ser mission_none"
 
 
 def _selftest_f3() -> None:
