@@ -44,6 +44,7 @@ RECONNECT_BACKOFF_MAX_S = 30.0       # teto do backoff
 HEARTBEAT_INTERVAL_S = 5.0           # cadência do watchdog/presença
 ESP32_SILENCE_S = 15.0               # sem telemetria por esse tempo => alerta
 ESP32_RELINK_S = 30.0                # sem telemetria por esse tempo => fecha e re-detecta a porta
+RX_LOG_EVERY = 15                    # loga 1 a cada N mensagens recebidas (visibilidade sem flood)
 
 log = logging.getLogger("rpi_daemon")
 
@@ -63,6 +64,7 @@ class RpiDaemon:
 
         self._last_esp32_msg = 0.0
         self._link_up = False
+        self._rx_count = 0
         self._reconnect_backoff = RECONNECT_BACKOFF_START_S
         self._silence_alerted = False
         self._hb_thread: threading.Thread | None = None
@@ -70,14 +72,31 @@ class RpiDaemon:
 
     # ── ESP32 -> RTDB ────────────────────────────────────────────────
     def on_esp32_message(self, msg: dict) -> None:
+        # 1) Marca a recepção IMEDIATAMENTE, ANTES de qualquer I/O de rede. Assim
+        #    o watchdog nunca declara "silêncio" só porque o Firebase está lento —
+        #    recebemos do ESP32 é fato local, independente de publicar.
         self._last_esp32_msg = self._clock()
-        self._silence_alerted = False  # recebeu algo: zera o alerta de silêncio
-        mtype = msg.get("type")
-        if mtype == "telemetry":
-            self.publisher.publish_telemetry(msg)
-        elif mtype == "event":
-            self.publisher.publish_event(msg)
-        # ack/pong: nada a publicar
+        self._silence_alerted = False
+        self._rx_count += 1
+        # 2) Log de visibilidade: a cada N mensagens, confirma que o fluxo está
+        #    vivo (antes o daemon era cego — "parou de logar" era indistinguível
+        #    de "parou de receber").
+        if self._rx_count % RX_LOG_EVERY == 1:
+            mtype0 = msg.get("type")
+            log.info("rx #%d do ESP32 (type=%s, state=%s)",
+                     self._rx_count, mtype0, msg.get("state"))
+        # 3) Publicação no Firebase ISOLADA: uma falha/lentidão de rede NÃO pode
+        #    derrubar a thread de leitura (senão o link inteiro congela, que era
+        #    exatamente o bug). Exceção é logada e seguimos lendo a serial.
+        try:
+            mtype = msg.get("type")
+            if mtype == "telemetry":
+                self.publisher.publish_telemetry(msg)
+            elif mtype == "event":
+                self.publisher.publish_event(msg)
+            # ack/pong: nada a publicar
+        except Exception as exc:
+            log.error("falha ao publicar no Firebase (seguindo a ler a serial): %s", exc)
 
     # ── RTDB -> ESP32 ────────────────────────────────────────────────
     def on_rtdb_command(self, command: dict) -> None:
