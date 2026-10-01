@@ -109,6 +109,10 @@ void loop() {
     sensorPrevMs = now;
     updateSensorValues();
 
+    // Retoma a navegação se um target ativo estava pendente aguardando fix
+    // (ex.: target recuperado no boot antes do GPS fixar). No-op fora desse caso.
+    maybeResumeNavigation();
+
     // Log de transição de prontidão: avisa quando o sistema fica pronto para
     // navegar (GPS fix obtido) — enquanto não, motores ficam desligados.
     static bool wasReady = false;

@@ -88,6 +88,31 @@ double computeLOSHeading(double fromLat, double fromLon, double toLat, double to
   return chiD;
 }
 
+void maybeResumeNavigation() {
+  // Retoma a navegação quando um target ativo estava PENDENTE (recebido/recuperado
+  // sem fix) e o GPS acabou de obter fix. Sem isto, um target recuperado no boot —
+  // quando o GPS ainda não fixou — ficava retido mas nunca disparava a navegação,
+  // deixando o barco em HOLD indefinidamente. Preserva o caso mission_none
+  // (hasActiveTarget=false => no-op) e não interfere se já está navegando.
+  if (!hasActiveTarget) return;              // nada a retomar (inclui mission_none)
+  if (!isSystemReady()) return;              // ainda sem fix: continua retido
+  if (currentState == NAVIGATING_TO_GOAL ||
+      currentState == RETURNING_TO_HOME ||
+      currentState == OBSTACLE_AVOIDANCE) {
+    return;                                   // já navegando: não reinicia a rota
+  }
+  // Estava em HOLD (ou offline) com target pendente e agora há fix → inicia.
+  homeLat = currentLat;
+  homeLon = currentLon;
+  routeDistanceMeters = computeDistanceMeters(currentLat, currentLon, goalLat, goalLon);
+  remainingDistanceMeters = routeDistanceMeters;
+  activeLeg = 0;
+  routeProgress = 0.0;
+  setNavState(NAVIGATING_TO_GOAL);
+  Serial.printf("[NAV] Navegacao RETOMADA ao obter fix: destino %.6f, %.6f (dist=%.1fm)\n",
+                goalLat, goalLon, routeDistanceMeters);
+}
+
 void updateLOSControl() {
   // GATE DE PRONTIDÃO: sem GPS fix não há posição confiável — motores DESLIGADOS
   // e nenhuma navegação. Isso protege contra sair navegando com a posição default

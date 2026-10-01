@@ -43,6 +43,7 @@ bool ultrasonicRHealthy = false;
 // (hasActiveTarget), definido por um set_destination real vindo do RPi.
 double goalLat = 0.0;
 double goalLon = 0.0;
+bool hasActiveTarget = false;   // nenhum target até um set_destination real
 double homeLat = 0.0;
 double homeLon = 0.0;
 double routeDistanceMeters = 0.0;

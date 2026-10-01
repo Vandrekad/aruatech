@@ -10,7 +10,7 @@
  * retoma a publicação direta no Firebase + buffering offline.
  *
  * Mensagens RPi -> ESP32 (comandos):
- *   {"cmd":"set_destination","command_id":"cmd_1","mission_id":"m_1","lat":-3.105,"lon":-60.03}
+ *   {"cmd":"set_destination","command_id":"cmd_1","mission_id":"m_1","lat":<lat>,"lon":<lon>}
  *   {"cmd":"emergency_stop","command_id":"cmd_2","mission_id":"m_1"}
  *   {"cmd":"request_telemetry"}
  *   {"cmd":"ping"}

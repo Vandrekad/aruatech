@@ -34,8 +34,12 @@ except ImportError:  # pragma: no cover
 
 @dataclass
 class SimState:
-    lat: float = -3.1019
-    lon: float = -60.0250
+    # SEM coordenada fabricada: o simulador parte sem posição (0/0), como o
+    # firmware real antes do 1º fix. Quem precisar de uma posição inicial deve
+    # passá-la explicitamente ao construir SimState — nenhum ponto fictício
+    # embutido no código.
+    lat: float = 0.0
+    lon: float = 0.0
     heading: float = 0.0
     battery_mv: int = 8000
     obs_dist: int = 200
@@ -46,10 +50,10 @@ class SimState:
     active_leg: int = 0
     progress: float = 0.0
     last_command_id: str = ""
-    goal_lat: float = -3.1019
-    goal_lon: float = -60.0250
-    home_lat: float = -3.1019
-    home_lon: float = -60.0250
+    goal_lat: float = 0.0
+    goal_lon: float = 0.0
+    home_lat: float = 0.0
+    home_lon: float = 0.0
 
 
 class Esp32Simulator:
@@ -192,6 +196,11 @@ def run_serial(port: str, baud: int) -> None:
 def run_selftest() -> int:
     outbox: list[dict] = []
     sim = Esp32Simulator(lambda obj: outbox.append(obj))
+    # Posição inicial EXPLÍCITA do teste (o default agora é 0/0 — sem ponto
+    # fabricado embutido). Coerente com o target do passo 2 (~500 m) para a
+    # física do simulador convergir dentro do loop.
+    sim.s.lat, sim.s.lon = -3.1019, -60.0250
+    sim.s.home_lat, sim.s.home_lon = -3.1019, -60.0250
 
     # 1) ping -> pong
     sim.handle({"cmd": "ping"})

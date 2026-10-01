@@ -31,20 +31,27 @@ void handleCommand(const DroneCommand &command) {
   Serial.println(command.type);
 
   if (command.type == "set_destination") {
-    // Gate de prontidão: não inicia navegação sem GPS fix válido. O comando é
-    // reconhecido (lastCommandId atualizado no fim), mas a missão não começa —
-    // o drone permanece em IDLE com motores desligados até haver fix.
+    // Guarda o target SEMPRE (mesmo sem fix): ele é a missão ativa a cumprir.
+    // Antes, sem fix o comando era rejeitado e ESQUECIDO (e o commandId gravado),
+    // o que fazia um target recuperado no boot — quando o GPS ainda não tem fix —
+    // se perder para sempre, deixando o barco em HOLD. Agora retemos o target e
+    // a navegação é ativada automaticamente quando o fix chega (ver maybeResumeNavigation).
+    activeMissionId = command.missionId;
+    goalLat = command.targetLat;
+    goalLon = command.targetLon;
+    hasActiveTarget = true;
+
+    // Gate de prontidão: só INICIA a navegação com GPS fix. Sem fix, o target
+    // fica pendente e o barco permanece em IDLE/HOLD (motores desligados) até o
+    // fix chegar — então maybeResumeNavigation() dispara a navegação.
     if (!isSystemReady()) {
-      Serial.println("set_destination RECUSADO: aguardando GPS fix.");
-      sendEventToRpi("command_rejected_no_fix", 0.0);
+      Serial.println("set_destination RETIDO: aguardando GPS fix para iniciar.");
+      sendEventToRpi("command_pending_no_fix", 0.0);
       lastCommandId = command.commandId;
       return;
     }
-    activeMissionId = command.missionId;
     homeLat = currentLat;
     homeLon = currentLon;
-    goalLat = command.targetLat;
-    goalLon = command.targetLon;
     routeDistanceMeters = computeDistanceMeters(currentLat, currentLon, goalLat, goalLon);
     remainingDistanceMeters = routeDistanceMeters;
     activeLeg = 0;
@@ -54,6 +61,7 @@ void handleCommand(const DroneCommand &command) {
                   command.targetLat, command.targetLon, routeDistanceMeters);
 
   } else if (command.type == "emergency_stop") {
+    hasActiveTarget = false;   // missão encerrada: nada a retomar quando houver fix
     goalLat = homeLat;
     goalLon = homeLon;
     routeDistanceMeters = computeDistanceMeters(currentLat, currentLon, homeLat, homeLon);

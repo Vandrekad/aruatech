@@ -50,6 +50,7 @@ extern bool ultrasonicRHealthy;         // último eco do sensor DIREITO foi vá
 // ─────────────────────────────────────────────────────────────────────────────
 extern double goalLat;
 extern double goalLon;
+extern bool hasActiveTarget;   // true quando há um set_destination ativo a cumprir (sobrevive à espera de fix)
 extern double homeLat;
 extern double homeLon;
 extern double routeDistanceMeters;

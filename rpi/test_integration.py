@@ -116,7 +116,12 @@ class _SimRunner:
 
     def __init__(self, endpoint) -> None:
         self.ep = endpoint
-        self.sim = Esp32Simulator(self._write_line, SimState())
+        # Posição inicial EXPLÍCITA do teste (SimState agora parte de 0/0, sem
+        # ponto fabricado). Coerente com o set_destination do cenário (~500 m).
+        _start = SimState()
+        _start.lat, _start.lon = -3.1019, -60.0250
+        _start.home_lat, _start.home_lon = -3.1019, -60.0250
+        self.sim = Esp32Simulator(self._write_line, _start)
         self._stop = threading.Event()
         self._rx = threading.Thread(target=self._rx_loop, daemon=True)
         self._tick = threading.Thread(target=self._tick_loop, daemon=True)

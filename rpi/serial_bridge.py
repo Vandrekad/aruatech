@@ -171,7 +171,14 @@ def main() -> None:
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--demo", action="store_true",
                     help="Envia ping + set_destination de demonstração após 2s")
+    ap.add_argument("--demo-lat", type=float, default=None,
+                    help="Latitude do set_destination de demo (obrigatória com --demo)")
+    ap.add_argument("--demo-lon", type=float, default=None,
+                    help="Longitude do set_destination de demo (obrigatória com --demo)")
     args = ap.parse_args()
+
+    if args.demo and (args.demo_lat is None or args.demo_lon is None):
+        ap.error("--demo exige --demo-lat e --demo-lon (sem coordenada fabricada embutida)")
 
     bridge = SerialBridge(args.port, args.baud)
     bridge.open()
@@ -183,7 +190,7 @@ def main() -> None:
             bridge.ping()
             time.sleep(1)
             print("[DEMO] set_destination")
-            bridge.set_destination("cmd_demo_1", "m_demo_1", -3.1050, -60.0300)
+            bridge.set_destination("cmd_demo_1", "m_demo_1", args.demo_lat, args.demo_lon)
         # Mantém vivo lendo telemetria até Ctrl+C
         while True:
             time.sleep(1)
