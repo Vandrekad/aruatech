@@ -50,6 +50,11 @@ class SerialBridge:
         self._stop = threading.Event()
 
     # ── ciclo de vida ────────────────────────────────────────────────
+    def set_port(self, port: str) -> None:
+        """Troca a porta usada no próximo open(). Usado pela autodetecção quando
+        o ESP32 reaparece em outro /dev/ttyUSB* após um replug/reboot."""
+        self.port = port
+
     def open(self) -> None:
         self._ser = serial.Serial(self.port, self.baud, timeout=0.2)
         self._stop.clear()

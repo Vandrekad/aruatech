@@ -43,6 +43,7 @@ RECONNECT_BACKOFF_START_S = 1.0      # 1º retry após 1s
 RECONNECT_BACKOFF_MAX_S = 30.0       # teto do backoff
 HEARTBEAT_INTERVAL_S = 5.0           # cadência do watchdog/presença
 ESP32_SILENCE_S = 15.0               # sem telemetria por esse tempo => alerta
+ESP32_RELINK_S = 30.0                # sem telemetria por esse tempo => fecha e re-detecta a porta
 
 log = logging.getLogger("rpi_daemon")
 
@@ -97,8 +98,28 @@ class RpiDaemon:
 
     # ── watchdog do link serial (F3) ─────────────────────────────────
     def _open_link(self) -> bool:
-        """Tenta abrir a bridge. Retorna True se conseguiu."""
+        """Tenta abrir a bridge. Retorna True se conseguiu.
+
+        Se a bridge expõe set_port (SerialBridge real), autodetectamos a porta do
+        ESP32 ANTES de abrir — sondando qual /dev/ttyUSB* fala o nosso protocolo.
+        Isso torna o link imune à oscilação ttyUSB0<->ttyUSB1 entre reboots/replug:
+        a cada (re)conexão redescobrimos onde o ESP32 está, em vez de confiar num
+        número de porta fixo.
+        """
         try:
+            # Autodetecção: só quando a bridge suporta troca de porta (duplo de
+            # teste não suporta, e aí mantém o comportamento antigo).
+            if hasattr(self.bridge, "set_port"):
+                from port_detect import detect_esp32_port
+                dev = detect_esp32_port(baud=getattr(self.bridge, "baud", 115200))
+                if dev is None:
+                    log.warning("ESP32 nao encontrado em nenhuma porta serial — nova tentativa em breve")
+                    self._link_up = False
+                    return False
+                if dev != getattr(self.bridge, "port", None):
+                    log.info("ESP32 detectado em %s", dev)
+                self.bridge.set_port(dev)
+
             self.bridge.on_message = self.on_esp32_message
             self.bridge.open()
             self._link_up = True
@@ -149,6 +170,19 @@ class RpiDaemon:
             except Exception:
                 pass
 
+        # 4) silêncio MUITO prolongado -> derruba o link para forçar RE-DETECÇÃO
+        #    da porta. Cobre o caso em que o ESP32 reconectou em OUTRO /dev/ttyUSB*
+        #    (ex.: ttyUSB0 -> ttyUSB1 após replug): a porta antiga segue "aberta"
+        #    mas muda; fechamos e o próximo _watchdog_tick re-sonda e reabre.
+        if (now - self._last_esp32_msg) > ESP32_RELINK_S:
+            log.warning("ESP32 silencioso ha >%ss - fechando link para re-detectar a porta", ESP32_RELINK_S)
+            try:
+                self.bridge.close()
+            except Exception:
+                pass
+            self._link_up = False
+            return
+
     def _heartbeat_loop(self) -> None:
         while not self._stop_evt.wait(HEARTBEAT_INTERVAL_S):
             try:
@@ -183,10 +217,14 @@ def run_production(args) -> None:
     from serial_bridge import SerialBridge  # import tardio (pyserial só na prod)
 
     backend = RTDBClient(args.service_account, args.database_url)
-    bridge = SerialBridge(args.port, args.baud)  # on_message setado pelo daemon
+    # --port é OPCIONAL: se omitido, a bridge nasce sem porta e o daemon
+    # autodetecta qual /dev/ttyUSB* é o ESP32 (ver _open_link). Se informado,
+    # ele é só uma DICA — a autodetecção ainda roda e corrige se mudou de número.
+    bridge = SerialBridge(args.port or "", args.baud)  # on_message setado pelo daemon
     daemon = RpiDaemon(bridge, backend, args.drone_id)
     daemon.start()
-    log.info("rodando. porta=%s drone=%s. Ctrl+C para sair.", args.port, args.drone_id)
+    log.info("rodando. porta=%s drone=%s. Ctrl+C para sair.",
+             args.port or "auto-detect", args.drone_id)
     try:
         while True:
             time.sleep(1)
@@ -361,7 +399,7 @@ def main() -> None:
     )
     ap = argparse.ArgumentParser(description="Daemon de bordo RPi4 (F2+F3) - ponte UART <-> RTDB")
     ap.add_argument("--selftest", action="store_true", help="Roda selftest em memoria (sem hardware/rede)")
-    ap.add_argument("--port", help="Porta serial do ESP32 (ex: /dev/serial0)")
+    ap.add_argument("--port", help="Porta serial do ESP32 (ex: /dev/ttyUSB0). OPCIONAL: se omitido, autodetecta sondando o protocolo.")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--service-account", help="Caminho do serviceAccount.json do Firebase")
     ap.add_argument("--database-url", help="URL do RTDB")
@@ -370,8 +408,8 @@ def main() -> None:
 
     if args.selftest:
         sys.exit(run_selftest())
-    if not (args.port and args.service_account and args.database_url):
-        ap.error("produção exige --port, --service-account e --database-url (ou use --selftest)")
+    if not (args.service_account and args.database_url):
+        ap.error("produção exige --service-account e --database-url (ou use --selftest). --port é opcional (autodetecção).")
     run_production(args)
 
 
